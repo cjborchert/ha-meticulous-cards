@@ -1,25 +1,25 @@
 /*
  * Meticulous companion cards, styled like the machine screen / meticulous-shot-card.
  * Only the Meticulous Espresso integration is required. Optional extras, used when they exist:
- * a calendar for the maintenance log, and helpers for some settings. Without them, the log and settings
- * are kept per machine in Home Assistant's frontend storage. See the README for how each card works:
+ * a calendar for the maintenance log. Settings (and the log without a calendar) are kept per machine in
+ * Home Assistant's frontend storage. See the README for how each card works:
  * https://github.com/cjborchert/ha-meticulous-cards
  *
- *   type: custom:meticulous-plunger-card       # cleaning button + piston position + cleaning reminder
- *   type: custom:meticulous-shots-card         # shot counter with 14-day bars
- *   type: custom:meticulous-maintenance-card   # descale + grease counters
- *     calendar: calendar.home_maintenance      #   optional: log maintenance to this calendar
- *     descale_interval: 200
+ *   type: custom:meticulous-cleaning-card              # cleaning button + piston position + cleaning reminder
+ *   type: custom:meticulous-shot-count-card            # shot counter with 14-day bars
+ *   type: custom:meticulous-maintenance-counter-card   # shots since descale / grease
+ *     calendar: calendar.home_maintenance              #   optional: log maintenance to this calendar
+ *     descale_interval: 200                            #   defaults until set from the gear icon
  *     grease_interval: 100
- *   type: custom:meticulous-effort-card        # piston friction trend, maintenance levels and forecast
- *     calendar: calendar.home_maintenance      #   optional: where "Log maintenance" adds events
- *     stroke: 76                               #   piston stroke in mm (for the lower's speed)
- *   type: custom:meticulous-history-card       # pick a recent shot for the shot + warm-up cards
- *     count: 5                                 #   shots to look back (also set from its gear)
- *     compact: false                           #   true: no title pill, for tight layouts
- *   prefix: meticulous_espresso                # every card: entity id prefix of the machine
+ *   type: custom:meticulous-maintenance-effort-card    # piston friction trend, maintenance levels and forecast
+ *     calendar: calendar.home_maintenance              #   optional: where "Log maintenance" adds events
+ *     stroke: 76                                       #   piston stroke in mm (for the lower's speed)
+ *   type: custom:meticulous-history-navigator-card     # pick a recent shot for the shot + warm-up cards
+ *     count: 5                                         #   shots to look back (also set from its gear)
+ *     compact: false                                   #   true: no title pill, for tight layouts
+ *   prefix: meticulous_espresso                        # every card: entity id prefix of the machine
  */
-const MC_VERSION = "3.4.0";
+const MC_VERSION = "3.5.0";
 
 /* Settings and logs are stored per Meticulous machine, shared by everyone, in Home Assistant's own
  * frontend storage ("system data"), so the cards need no helpers, calendar or integration changes.
@@ -286,10 +286,10 @@ function mcPurgeSVG(colour) {
 /* ------------------------------------------------------------------ */
 /* Cleaning / piston card                                              */
 /* ------------------------------------------------------------------ */
-class MeticulousPlungerCard extends mcEl("plunger") {
-  // Cleaning reminder: on/off lives in an input_boolean helper when it exists (shared by everyone),
-  // otherwise with the machine's settings. Set reminder: false in the card config to remove it completely.
-  defaults() { return { reminder: true, reminder_entity: "input_boolean.meticulous_cleaning_reminder" }; }
+class MeticulousCleaningCard extends mcEl("plunger") {
+  // Cleaning reminder: on/off is kept with the machine's settings (gear icon). Set reminder: false in the
+  // card config to remove it completely.
+  defaults() { return { reminder: true }; }
   getGridOptions() { return { columns: 6, min_columns: 4, rows: "auto" }; }
 
   _posId() {
@@ -454,8 +454,6 @@ class MeticulousPlungerCard extends mcEl("plunger") {
   // ---- cleaning reminder ----
   _reminderOn() {
     if (!this._cfg.reminder) return false;
-    const id = this._cfg.reminder_entity, st = id && this._hass && this._hass.states[id];
-    if (st) return st.state === "on";
     const m = mcM(this._hass, this._cfg.prefix);
     if (!m) { mcStore(this._hass).then(() => { this._key = null; this.hass = this._hass; }); return true; }
     return m.reminder !== false;
@@ -502,11 +500,9 @@ class MeticulousPlungerCard extends mcEl("plunger") {
     r.getElementById("opt-off").classList.toggle("on", !this._draftOn);
   }
   async _saveReminder() {
-    const id = this._cfg.reminder_entity;
     try {
-      if (id && this._hass.states[id]) await this._hass.callService("input_boolean", this._draftOn ? "turn_on" : "turn_off", { entity_id: id });
-      else await mcMSave(this._hass, this._cfg.prefix, { reminder: !!this._draftOn });
-    } catch (e) { console.warn("meticulous-plunger-card", e); }
+      await mcMSave(this._hass, this._cfg.prefix, { reminder: !!this._draftOn });
+    } catch (e) { console.warn("meticulous-cleaning-card", e); }
     this._hideConfirm();
     this._key = null;
     this.hass = this._hass;
@@ -596,7 +592,7 @@ class MeticulousPlungerCard extends mcEl("plunger") {
 /* ------------------------------------------------------------------ */
 /* Shot counter card                                                   */
 /* ------------------------------------------------------------------ */
-class MeticulousShotsCard extends mcEl("shots") {
+class MeticulousShotCountCard extends mcEl("shots") {
   defaults() { return { days: 14 }; }
   getGridOptions() { return { columns: 6, min_columns: 4, rows: "auto" }; }
 
@@ -681,7 +677,7 @@ class MeticulousShotsCard extends mcEl("shots") {
         this._days.push({ t: d.getTime(), n: byDay[d.getTime()] || 0 });
       }
     } catch (e) {
-      console.warn("meticulous-shots-card", e);
+      console.warn("meticulous-shot-count-card", e);
     } finally {
       this._busy = false;
       this._render();
@@ -725,19 +721,14 @@ class MeticulousShotsCard extends mcEl("shots") {
 /* ------------------------------------------------------------------ */
 /* Maintenance card (descale + grease)                                 */
 /* ------------------------------------------------------------------ */
-class MeticulousMaintenanceCard extends mcEl("maint") {
+class MeticulousMaintenanceCounterCard extends mcEl("maint") {
   defaults() {
-    return { calendar: "calendar.home_maintenance", descale_interval: 200, grease_interval: 100,
-             descale_entity: "input_number.meticulous_descale_interval",
-             grease_entity: "input_number.meticulous_grease_interval" };
+    return { calendar: "calendar.home_maintenance", descale_interval: 200, grease_interval: 100 };
   }
   getGridOptions() { return { columns: 12, min_columns: 6, rows: "auto" }; }
 
   _interval(key) {
-    // Interval: input_number helper if it exists, else the machine's setting, else the card config
-    const id = this._cfg[`${key}_entity`];
-    const v = this._hass && id ? this._n(id) : null;
-    if (v !== null && v > 0) return Math.round(v);
+    // Interval: the machine's setting (gear icon), else the card config
     const m = this._hass && mcM(this._hass, this._cfg.prefix);
     const u = m && m.intervals && m.intervals[key];
     return u > 0 ? u : this._cfg[`${key}_interval`];
@@ -890,7 +881,7 @@ class MeticulousMaintenanceCard extends mcEl("maint") {
         this._lastDone[t.key] = { when, shots, est };
       }
     } catch (e) {
-      console.warn("meticulous-maintenance-card", e);
+      console.warn("meticulous-maintenance-counter-card", e);
     } finally {
       this._busy = false;
       this._render();
@@ -1003,14 +994,12 @@ class MeticulousMaintenanceCard extends mcEl("maint") {
     this.shadowRoot.getElementById(`val-${t.key}`).textContent = this._draft[t.key];
   }
   async _saveInterval(t) {
-    const id = this._cfg[`${t.key}_entity`];
     const v = this._draft[t.key];
     try {
-      if (id && this._hass.states[id]) await this._hass.callService("input_number", "set_value", { entity_id: id, value: v });
-      else await mcMSave(this._hass, this._cfg.prefix, { intervals: Object.assign({}, (mcM(this._hass, this._cfg.prefix) || {}).intervals || {}, { [t.key]: v }) });
+      await mcMSave(this._hass, this._cfg.prefix, { intervals: Object.assign({}, (mcM(this._hass, this._cfg.prefix) || {}).intervals || {}, { [t.key]: v }) });
       this._closeSettings(t); this._close(t); this._render();
     } catch (e) {
-      console.warn("meticulous-maintenance-card", e);
+      console.warn("meticulous-maintenance-counter-card", e);
       this.shadowRoot.getElementById(`val-${t.key}`).textContent = mcSaveErr(e) === "COULD NOT SAVE" ? "ERR" : "ADMIN";
     }
   }
@@ -1025,7 +1014,7 @@ class MeticulousMaintenanceCard extends mcEl("maint") {
       setTimeout(() => this._fetch(), 1500);
     } catch (e) {
       q.textContent = mcSaveErr(e);
-      console.warn("meticulous-maintenance-card", e);
+      console.warn("meticulous-maintenance-counter-card", e);
       setTimeout(() => this._close(t), 2500);
     }
   }
@@ -1067,7 +1056,7 @@ function mcLogEvents(hass, prefix) {
 /* ------------------------------------------------------------------ */
 /* Piston effort trend card (friction / maintenance)                   */
 /* ------------------------------------------------------------------ */
-class MeticulousEffortCard extends mcEl("effort") {
+class MeticulousMaintenanceEffortCard extends mcEl("effort") {
   defaults() { return { calendar: "calendar.home_maintenance", stroke: 76 }; }
   getGridOptions() { return { columns: 12, min_columns: 6, rows: "auto" }; }
 
@@ -1117,7 +1106,7 @@ class MeticulousEffortCard extends mcEl("effort") {
 
   // Entity for a move/metric: first one that exists (integration naming or the older local patch naming)
   _entity(move, metric) {
-    const m = MeticulousEffortCard.MOVES.find((x) => x.key === (move || this._move));
+    const m = MeticulousMaintenanceEffortCard.MOVES.find((x) => x.key === (move || this._move));
     const key = metric || this._metric;
     const ids = m.ids[key].map((slug) => mcFind(this._hass, this._cfg.prefix, slug));
     const id = ids.find((x) => this._hass && this._hass.states[x]) || ids[0];
@@ -1130,11 +1119,11 @@ class MeticulousEffortCard extends mcEl("effort") {
     this._move = "retraction"; this._metric = "current"; this._range = 90;
     try {
       const p = JSON.parse(window.localStorage.getItem("msc-effort-prefs") || "{}");
-      if (MeticulousEffortCard.MOVES.some((m) => m.key === p.move)) this._move = p.move;
+      if (MeticulousMaintenanceEffortCard.MOVES.some((m) => m.key === p.move)) this._move = p.move;
       else if (p.move === "aftershot") this._move = "retraction";
       else if (p.move) this._move = "lower";                       // older "raise"/"lower" choices
-      if (MeticulousEffortCard.METRICS.some((m) => m.key === p.metric)) this._metric = p.metric;
-      if (MeticulousEffortCard.RANGES.some((r) => r[1] === p.range)) this._range = p.range;
+      if (MeticulousMaintenanceEffortCard.METRICS.some((m) => m.key === p.metric)) this._metric = p.metric;
+      if (MeticulousMaintenanceEffortCard.RANGES.some((r) => r[1] === p.range)) this._range = p.range;
     } catch (e) { /* ignore */ }
   }
   _savePrefs() {
@@ -1264,7 +1253,7 @@ class MeticulousEffortCard extends mcEl("effort") {
 
   _renderButtons() {
     const r = this.shadowRoot;
-    const metric = MeticulousEffortCard.METRICS.find((x) => x.key === this._metric);
+    const metric = MeticulousMaintenanceEffortCard.METRICS.find((x) => x.key === this._metric);
     const mk = (id, items, cur, onPick, colour) => {
       const el = r.getElementById(id); el.innerHTML = "";
       for (const [val, label] of items) {
@@ -1275,10 +1264,10 @@ class MeticulousEffortCard extends mcEl("effort") {
         el.appendChild(b);
       }
     };
-    mk("moves", MeticulousEffortCard.MOVES.map((m) => [m.key, m.label]), this._move, (v) => { this._move = v; this._changed(); }, MC.label);
-    mk("metrics", MeticulousEffortCard.METRICS.map((m) => [m.key, m.label]), this._metric, (v) => { this._metric = v; this._changed(); }, metric.colour);
-    mk("ranges", MeticulousEffortCard.RANGES.map(([l, d]) => [d, l]), this._range, (v) => { this._range = v; this._changed(); }, MC.dim);
-    const mv = MeticulousEffortCard.MOVES.find((x) => x.key === this._move);
+    mk("moves", MeticulousMaintenanceEffortCard.MOVES.map((m) => [m.key, m.label]), this._move, (v) => { this._move = v; this._changed(); }, MC.label);
+    mk("metrics", MeticulousMaintenanceEffortCard.METRICS.map((m) => [m.key, m.label]), this._metric, (v) => { this._metric = v; this._changed(); }, metric.colour);
+    mk("ranges", MeticulousMaintenanceEffortCard.RANGES.map(([l, d]) => [d, l]), this._range, (v) => { this._range = v; this._changed(); }, MC.dim);
+    const mv = MeticulousMaintenanceEffortCard.MOVES.find((x) => x.key === this._move);
     r.getElementById("hint").textContent = mv ? mv.hint : "";
   }
 
@@ -1375,7 +1364,7 @@ class MeticulousEffortCard extends mcEl("effort") {
       this._marksYear = bounds.length;
       pred = await this._predict();
     } catch (e) {
-      console.warn("meticulous-effort-card", e);
+      console.warn("meticulous-maintenance-effort-card", e);
       failed = true;
     }
     if (token !== this._token) return; // a newer fetch started
@@ -1412,7 +1401,7 @@ class MeticulousEffortCard extends mcEl("effort") {
   static get SUGGEST() { return { retraction: [1.3, 1.5], lower: [1.1, 1.15] }; }
   _levelsFor(basis, base) {
     const saved = this._settings().levels[basis] || {};
-    const [fs, fd] = MeticulousEffortCard.SUGGEST[basis];
+    const [fs, fd] = MeticulousMaintenanceEffortCard.SUGGEST[basis];
     const r5 = (v) => Math.round(v * 20) / 20;
     return {
       soon: saved.soon ?? (base ? r5(base * fs) : null),
@@ -1463,7 +1452,7 @@ class MeticulousEffortCard extends mcEl("effort") {
       st.style.color = "";
       eta.textContent = `${mvName(p.basis)}: ${p.n} of 3 measurements ${p.lastService ? "since then" : "so far"}`; return;
     }
-    const L = MeticulousEffortCard.LEVELS[p.status];
+    const L = MeticulousMaintenanceEffortCard.LEVELS[p.status];
     st.innerHTML = `<span class="dot" style="background:${L.colour};box-shadow:0 0 6px ${L.colour}"></span>${L.label}`;
     st.style.color = p.status === "ok" ? "" : L.colour;
     const lvl = `${mvName(p.basis)} ${p.level.toFixed(2)} A`;
@@ -1486,7 +1475,7 @@ class MeticulousEffortCard extends mcEl("effort") {
     this._paintSettings();
     r.getElementById("setOver").classList.add("show");
     // levels right after the last maintenance for both moves, for the suggestions and the note
-    for (const m of MeticulousEffortCard.MOVES) {
+    for (const m of MeticulousMaintenanceEffortCard.MOVES) {
       if (this._predAll[m.key]) continue;
       this._predict(m.key).then((p) => { this._predAll[m.key] = p; if (r.getElementById("setOver").classList.contains("show")) this._paintSettings(); }).catch(() => {});
     }
@@ -1496,13 +1485,13 @@ class MeticulousEffortCard extends mcEl("effort") {
     const p = (this._predAll || {})[d.basis] || null;
     const r5 = (v) => Math.round(v * 20) / 20;
     const base = p && p.base ? p.base : null;
-    const [fs, fd] = MeticulousEffortCard.SUGGEST[d.basis];
+    const [fs, fd] = MeticulousMaintenanceEffortCard.SUGGEST[d.basis];
     return { soon: saved.soon ?? (base ? r5(base * fs) : 1.3), due: saved.due ?? (base ? r5(base * fd) : 1.5) };
   }
   _paintSettings() {
     const r = this.shadowRoot, d = this._draft;
     const el = r.getElementById("setBasis"); el.innerHTML = "";
-    for (const m of MeticulousEffortCard.MOVES) {
+    for (const m of MeticulousMaintenanceEffortCard.MOVES) {
       const b = document.createElement("button");
       b.textContent = m.label; b.className = m.key === d.basis ? "on" : ""; b.style.setProperty("--c", MC.label);
       b.addEventListener("click", () => { d.basis = m.key; this._paintSettings(); });
@@ -1516,7 +1505,7 @@ class MeticulousEffortCard extends mcEl("effort") {
       ? `Now ${p.level.toFixed(2)} A · after maintenance ${p.base.toFixed(2)} A`
       : pa && pa.missing ? "No sensor for this move"
       : pa && pa.lastService ? "Too few measurements since the last maintenance" : "Too few measurements yet";
-    const saved = d.levels[d.basis] || {}, [fs, fd] = MeticulousEffortCard.SUGGEST[d.basis];
+    const saved = d.levels[d.basis] || {}, [fs, fd] = MeticulousMaintenanceEffortCard.SUGGEST[d.basis];
     r.getElementById("setSug").textContent = saved.soon == null || saved.due == null
       ? `Suggested: +${Math.round((fs - 1) * 100)} % / +${Math.round((fd - 1) * 100)} % of the level after maintenance` : "";
     // Only admins can change the machine's shared settings
@@ -1579,7 +1568,7 @@ class MeticulousEffortCard extends mcEl("effort") {
       q.textContent = "LOGGED ✓";
       setTimeout(() => { r.getElementById("logOver").classList.remove("show"); this._fetch(); }, 1200);
     } catch (e) {
-      console.warn("meticulous-effort-card", e);
+      console.warn("meticulous-maintenance-effort-card", e);
       q.textContent = mcSaveErr(e);
     }
   }
@@ -1624,7 +1613,7 @@ class MeticulousEffortCard extends mcEl("effort") {
   _render() {
     const r = this.shadowRoot;
     this._renderService();
-    const metric = MeticulousEffortCard.METRICS.find((x) => x.key === this._metric);
+    const metric = MeticulousMaintenanceEffortCard.METRICS.find((x) => x.key === this._metric);
     const pts = this._pts || [];
     const legend = r.getElementById("legend");
     if (!pts.length) {
@@ -1741,7 +1730,7 @@ class MeticulousEffortCard extends mcEl("effort") {
     const cx = g.x(p.t), cy = g.y(p.v);
     const cl = svg.querySelector("#cl"), cp = svg.querySelector("#cp");
     cl.setAttribute("x1", cx); cl.setAttribute("x2", cx); cp.setAttribute("cx", cx); cp.setAttribute("cy", cy);
-    const metric = MeticulousEffortCard.METRICS.find((x) => x.key === this._metric);
+    const metric = MeticulousMaintenanceEffortCard.METRICS.find((x) => x.key === this._metric);
     const idx = pts.indexOf(p), isLast = idx === pts.length - 1;
     const sm = this._line && this._line[idx] ? this._line[idx].v : p.v;
     const selT = this.shadowRoot.getElementById("selT"), selV = this.shadowRoot.getElementById("selV");
@@ -1769,7 +1758,7 @@ function mcDur(sec) {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-class MeticulousHistoryCard extends mcEl("history") {
+class MeticulousHistoryNavigatorCard extends mcEl("history") {
   defaults() { return { count: 5, days: 14, compact: false,
     live_states: ["Starting...", "Heating", "Preheating", "Click to Start"] }; }
   getGridOptions() { return { columns: 12, min_columns: 6, rows: "auto" }; }
@@ -1843,7 +1832,7 @@ class MeticulousHistoryCard extends mcEl("history") {
       this._broadcast();
       this._retries = 0;
     } catch (e) {
-      console.warn("meticulous-history-card", e);
+      console.warn("meticulous-history-navigator-card", e);
       this._retries = (this._retries || 0) + 1;
       clearTimeout(this._retryT);
       this._retryT = setTimeout(() => this._fetch(), Math.min(60e3, 5e3 * 2 ** (this._retries - 1)));
@@ -1937,7 +1926,7 @@ class MeticulousHistoryCard extends mcEl("history") {
     r.getElementById("plus").addEventListener("click", () => { this._draft = Math.min(20, this._draft + 1); this._paintDraft(); });
     r.getElementById("save").addEventListener("click", async () => {
       r.getElementById("over").classList.remove("show");
-      try { await mcMSave(this._hass, this._cfg.prefix, { history_count: this._draft }); } catch (e) { console.warn("meticulous-history-card: only an admin can change this", e); }
+      try { await mcMSave(this._hass, this._cfg.prefix, { history_count: this._draft }); } catch (e) { console.warn("meticulous-history-navigator-card: only an admin can change this", e); }
       this._idx = Math.min(this._idx, Math.max(0, this._list().length - 1));
       this._broadcast();
       this._render();
@@ -2006,18 +1995,25 @@ function mcCoverMissing(cls) {
   });
 }
 
-for (const [tag, cls, name, desc] of [
-  ["meticulous-plunger-card", MeticulousPlungerCard, "Meticulous Cleaning / Piston", "Raise/lower the piston with a live position graphic."],
-  ["meticulous-shots-card", MeticulousShotsCard, "Meticulous Shot Counter", "Total shots, today, last 7 days and a 14-day bar chart."],
-  ["meticulous-maintenance-card", MeticulousMaintenanceCard, "Meticulous Maintenance", "Shots since descale / grease, logs to a calendar."],
-  ["meticulous-history-card", MeticulousHistoryCard, "Meticulous Shot History", "Step back through recent shots on the shot and warm-up cards."],
-  ["meticulous-effort-card", MeticulousEffortCard, "Meticulous Piston Effort", "Piston friction over time (manual lower and post-shot retraction), with maintenance levels, a forecast and maintenance logging."],
+for (const [tag, cls, name, desc, oldTag] of [
+  ["meticulous-cleaning-card", MeticulousCleaningCard, "Meticulous Cleaning",
+    "Raise/lower the piston with a live position graphic and a cleaning reminder.", "meticulous-plunger-card"],
+  ["meticulous-shot-count-card", MeticulousShotCountCard, "Meticulous Shot Count",
+    "Total shots, today, last 7 days and a 14-day bar chart.", "meticulous-shots-card"],
+  ["meticulous-maintenance-counter-card", MeticulousMaintenanceCounterCard, "Meticulous Maintenance Counter",
+    "Shots since the last descale and grease against intervals you set, with logging.", "meticulous-maintenance-card"],
+  ["meticulous-history-navigator-card", MeticulousHistoryNavigatorCard, "Meticulous History Navigator",
+    "Step back through recent shots on the shot and warm-up cards.", "meticulous-history-card"],
+  ["meticulous-maintenance-effort-card", MeticulousMaintenanceEffortCard, "Meticulous Maintenance Effort",
+    "Piston friction over time, with maintenance levels, a forecast and maintenance logging.", "meticulous-effort-card"],
 ]) {
   if (!customElements.get(tag)) {
-    if (cls !== MeticulousEffortCard) mcCoverMissing(cls);   // the effort card shows its own message
+    if (cls !== MeticulousMaintenanceEffortCard) mcCoverMissing(cls);   // the effort card shows its own message
     customElements.define(tag, cls);
     window.customCards = window.customCards || [];
     window.customCards.push({ type: tag, name, description: desc });
   }
+  // The names used before 1.1 keep working (not listed in the card picker)
+  if (oldTag && !customElements.get(oldTag)) customElements.define(oldTag, class extends cls {});
 }
 console.info(`%c METICULOUS-CARDS %c ${MC_VERSION} `, "background:#38e0f0;color:#000;font-weight:700", "background:#000;color:#fff");

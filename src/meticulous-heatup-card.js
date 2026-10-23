@@ -14,10 +14,10 @@
  * active_states: [Starting..., Heating, Preheating, Click to Start]  # optional, states plotted live
  * days: 10                                    # optional, how far back to look for the last warm-up
  *
- * With a meticulous-history-card on the same dashboard, the card shows the warm-up before the shot
+ * With a meticulous-history-navigator-card on the same dashboard, the card shows the warm-up before the shot
  * picked there (and switches to live whenever the machine starts warming up again).
  */
-const MHC_VERSION = "1.3.0";
+const MHC_VERSION = "1.3.1";
 // Short "when" label for a shot: 08:41 today, otherwise MON 08:41 (this week) or 12 OCT
 function mhcWhen(ms) {
   const d = new Date(ms), now = new Date();
@@ -85,7 +85,7 @@ class MeticulousHeatupCard extends HTMLElement {
   }
 
   connectedCallback() {
-    // Follow the shot history card (meticulous-history-card), if there is one on the page
+    // Follow the shot history card (meticulous-history-navigator-card), if there is one on the page
     if (!this._onSel) this._onSel = () => { if (!this._wasActive) this._refresh(); else this._render(); };
     window.addEventListener("meticulous-shot-select", this._onSel);
     if (this._hass && !this._wasActive && this._lastFetch && Date.now() - this._lastFetch > 5 * 60 * 1000) this._refresh();

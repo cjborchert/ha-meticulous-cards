@@ -10,7 +10,7 @@
  * pressure_max: 12
  * weight_max: 55                     # grows automatically if the shot is heavier
  */
-const MSC_VERSION = "1.5.0";
+const MSC_VERSION = "1.5.1";
 // Seconds as "47.0 s" below a minute, "7:14" from a minute on.
 // Short "when" label for a shot: 08:41 today, otherwise MON 08:41 (this week) or 12 OCT
 function mscWhen(ms) {
@@ -108,7 +108,7 @@ class MeticulousShotCard extends HTMLElement {
   }
 
   connectedCallback() {
-    // Follow the shot history card (meticulous-history-card), if there is one on the page
+    // Follow the shot history card (meticulous-history-navigator-card), if there is one on the page
     if (!this._onSel) this._onSel = (e) => this._select(e.detail);
     window.addEventListener("meticulous-shot-select", this._onSel);
     // Re-check history when the dashboard is shown again (e.g. after a tab was asleep).
