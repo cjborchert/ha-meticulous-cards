@@ -1,0 +1,13 @@
+{
+  "name": "ha-meticulous-cards",
+  "version": "1.0.0",
+  "description": "Home Assistant dashboard cards for the Meticulous espresso machine",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --format=esm --target=es2020 --legal-comments=inline --outfile=dist/meticulous-cards.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}
