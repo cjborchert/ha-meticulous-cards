@@ -1,6 +1,6 @@
 {
   "name": "ha-meticulous-cards",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Home Assistant dashboard cards for the Meticulous espresso machine",
   "private": true,
   "license": "MIT",

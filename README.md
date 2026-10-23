@@ -4,8 +4,8 @@
 
 Home Assistant dashboard cards for the Meticulous espresso machine,
 styled like the machine's own screen. They only need the
-[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous). Calendars and helpers
-are optional extras.
+[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous). A calendar for the
+maintenance log is an optional extra; everything else is set up from the cards themselves.
 
 ![The Meticulous cards on a dashboard](images/dashboard.jpg)
 
@@ -13,11 +13,17 @@ are optional extras.
 |---|---|
 | `meticulous-shot-card` | The last shot: pressure, flow, weight and piston position, live while brewing |
 | `meticulous-heatup-card` | Temperatures while the machine warms up, live while heating |
-| `meticulous-history-card` | Step back through recent shots on the shot and warm-up cards |
-| `meticulous-plunger-card` | Cleaning: raise/lower the piston, live piston graphic, cleaning reminder |
-| `meticulous-shots-card` | Shot counter: total, today, last 7 days and a 14-day bar chart |
-| `meticulous-maintenance-card` | Shots since the last descale and grease, with logging |
-| `meticulous-effort-card` | Piston friction over time, maintenance levels and a forecast |
+| `meticulous-history-navigator-card` | Step back through recent shots on the shot and warm-up cards |
+| `meticulous-cleaning-card` | Raise/lower the piston, live piston graphic, cleaning reminder |
+| `meticulous-shot-count-card` | Total shots, today, last 7 days and a 14-day bar chart |
+| `meticulous-maintenance-counter-card` | Shots since the last descale and grease, against intervals you set |
+| `meticulous-maintenance-effort-card` | Piston friction over time, maintenance levels and a forecast |
+
+Renamed in 1.1.0: `meticulous-plunger-card` → `meticulous-cleaning-card`, `meticulous-shots-card` →
+`meticulous-shot-count-card`, `meticulous-history-card` → `meticulous-history-navigator-card`,
+`meticulous-maintenance-card` → `meticulous-maintenance-counter-card` and `meticulous-effort-card` →
+`meticulous-maintenance-effort-card`. The old names still work, so existing dashboards keep running,
+but they no longer appear in the card picker.
 
 ## Maintenance: two cards to choose from
 
@@ -27,7 +33,7 @@ manufacturer's advice: when in doubt, follow Meticulous's
 
 There are two maintenance cards. Use either one, or both:
 
-| | Maintenance card (`meticulous-maintenance-card`) | Piston effort card (`meticulous-effort-card`) |
+| | Maintenance counter (`meticulous-maintenance-counter-card`) | Maintenance effort (`meticulous-maintenance-effort-card`) |
 |---|---|---|
 | **What it tracks** | Shots since the last descale and since the last grease | The motor current needed to move the piston, i.e. piston friction |
 | **When it says maintenance is due** | After the number of shots you set for each | When friction reaches the levels you set, with a forecast in days and shots |
@@ -35,8 +41,8 @@ There are two maintenance cards. Use either one, or both:
 | **Best for** | A simple, predictable schedule | Maintenance based on the machine's actual condition |
 
 **Neither card can tell you *what* needs doing:**
-- The maintenance card only counts shots. It doesn't measure the machine's condition.
-- The piston effort card measures **total** friction. Running out of grease, scale build-up and
+- The maintenance counter only counts shots. It doesn't measure the machine's condition.
+- The maintenance effort card measures **total** friction. Running out of grease, scale build-up and
   coffee residue in the cylinder all add to that friction, and the card can't tell them apart.
 
 When either card says maintenance is due, it's up to you to check whether the piston needs
@@ -89,29 +95,29 @@ days: 10              # optional: how far back to look for the last warm-up
 ```
 
 ```yaml
-type: custom:meticulous-history-card
+type: custom:meticulous-history-navigator-card
 count: 5              # shots to look back (also set from its gear)
 compact: false        # true: no title pill, for tight layouts
 ```
 
 ```yaml
-type: custom:meticulous-plunger-card
+type: custom:meticulous-cleaning-card
 reminder: true        # false removes the cleaning reminder
 ```
 
 ```yaml
-type: custom:meticulous-shots-card
+type: custom:meticulous-shot-count-card
 ```
 
 ```yaml
-type: custom:meticulous-maintenance-card
+type: custom:meticulous-maintenance-counter-card
 calendar: calendar.home_maintenance   # optional: log descales/greases to this calendar
-descale_interval: 200                 # shots
+descale_interval: 200                 # shots; starting values until you change them with the gear
 grease_interval: 100
 ```
 
 ```yaml
-type: custom:meticulous-effort-card
+type: custom:meticulous-maintenance-effort-card
 calendar: calendar.home_maintenance   # optional: where "Log maintenance" adds events
 ```
 
@@ -119,7 +125,7 @@ If a card can't find the machine it says **Machine not found** and which entity 
 
 ## How the cards work
 
-### Cleaning card (`meticulous-plunger-card`)
+### Cleaning card (`meticulous-cleaning-card`)
 
 - Raises or lowers the piston with the integration's *Home* and *Purge* buttons. You confirm each
   move unless you are reversing a move made in the last 2 minutes.
@@ -139,11 +145,10 @@ If a card can't find the machine it says **Machine not found** and which entity 
   | Purge, piston already at the bottom | DEPRESSURIZING. The machine stays in *Purge* for another 20–30 s while it depressurizes. The card can only detect this with the Piston Position sensor. |
 
 - **Cleaning reminder**: after a shot the status line reads *Clean due · n shots* until the piston
-  is raised. You can turn this off with the gear icon. The setting is stored in the
-  `input_boolean.meticulous_cleaning_reminder` helper if you create one, otherwise with the
-  machine's settings (see *Where settings are kept*). Set `reminder: false` to remove the reminder completely.
+  is raised. You can turn this off with the gear icon; the setting is kept with the machine's settings
+  (see *Where settings are kept*). Set `reminder: false` to remove the reminder completely.
 
-### Shot card, warm-up card and shot history
+### Shot card, warm-up card and history navigator
 
 - **Shot card**: the last brewing cycle (`binary_sensor.<prefix>_brewing` off → on → off), loaded
   from recorder history. While a shot runs it plots live, redrawing at most 5 times a second so
@@ -151,16 +156,16 @@ If a card can't find the machine it says **Machine not found** and which entity 
 - **Warm-up card**: the boiler, brew head and external temperatures plus the target, from the moment
   the machine starts heating until the shot starts. It plots live and marks when the machine became
   READY. Sensors that are disabled in the integration are left out.
-- **Shot history card**: ◀ ▶ arrows and dots to step back through recent shots. The gear sets how
+- **History navigator card**: ◀ ▶ arrows and dots to step back through recent shots. The gear sets how
   many shots to look back (1–20, default 5). The shot and warm-up cards on the same page follow the
   selection and show a small tag such as `#2 / 10:50`. The count is kept with the machine's settings. Whenever the machine starts heating or brewing,
-  every card jumps back to live. Without a history card on the page, both cards simply show the
+  every card jumps back to live. Without a history navigator on the page, both cards simply show the
   latest shot.
 
 ### Where settings are kept
 
 Settings you change on the cards (maintenance levels and the measure they use, maintenance
-intervals, the cleaning reminder, how many shots the history card shows) and the maintenance log
+intervals, the cleaning reminder, how many shots the history navigator shows) and the maintenance log
 (when there is no calendar) are saved **per Meticulous machine**, not per Home Assistant user, so
 every user, phone and wall panel sees the same values. The cards keep them in Home Assistant's own
 frontend storage under the key `meticulous-cards`, one entry per machine (its device in Home
@@ -168,24 +173,26 @@ Assistant), so nothing extra has to be set up. Changes made on one screen show u
 straight away.
 
 - Everyone can **see** the settings, but Home Assistant only lets **admins change** them. For other
-  users the piston effort card's gear menu is read-only and says so, and other saves show *Only an
+  users the maintenance effort card's gear menu is read-only and says so, and other saves show *Only an
   admin can save*. Logging to a calendar works for every user; logging without a calendar is a
   setting change, so only admins can do it (the card says so instead of offering the button).
-- Per browser, not per machine: which move, measure and time range the piston effort card shows.
-- Helpers still win where they exist (`input_number` intervals, the reminder `input_boolean`).
+- Per browser, not per machine: which move, measure and time range the maintenance effort card shows.
+- Versions before 1.1.0 could also read these settings from `input_number` / `input_boolean`
+  helpers. That is no longer needed or used: set them on the cards. Helpers you created for this can
+  be deleted.
 
-### Shots and maintenance cards
+### Shot count and maintenance counter
 
-- **Shots card**: total shots, today, the last 7 days and a 14-day bar chart. It uses long-term
+- **Shot count card**: total shots, today, the last 7 days and a 14-day bar chart. It uses long-term
   statistics, which Home Assistant keeps forever.
-- **Maintenance card**: shots since the last descale and grease, against an interval you can change
+- **Maintenance counter card**: shots since the last descale and grease, against an interval you can change
   with the gear. Logging is stored in a calendar if you configure one (`calendar:`), otherwise in the
   machine's own log (see *Where settings are kept*).
 - The integration's *Total Shots* sensor only refreshes after a shot, so it can be unknown for hours
   after a Home Assistant restart. While it is unknown, these cards use the last recorded value plus
   the shots counted since from the brewing sensor.
 
-### Piston effort card
+### Maintenance effort card (piston effort)
 
 Shows how much current the piston motor needs over time: rising current means more seal friction,
 and it drops back after greasing or descaling. It can show the manual **Lower** (when you lower the
