@@ -1,8 +1,9 @@
 # Piston effort card (`meticulous-effort-card`)
 
-Shows how much current the piston motor needs over time. Rising current means more friction, and
-it drops back after greasing or descaling. The card also says whether maintenance is coming up,
-forecasts when it will be due, and lets you log maintenance.
+The piston is sealed against the brew chamber wall. As the seal's lubrication wears off and scale
+builds up, it takes more force to move the piston. The card shows that force as **motor current**
+over time: it creeps up between maintenance and drops back after greasing or descaling. The card
+also tells you when maintenance is coming up, forecasts when it will be due, and lets you log it.
 
 ```yaml
 type: custom:meticulous-effort-card
@@ -10,44 +11,111 @@ calendar: calendar.home_maintenance   # optional: "Log maintenance" adds events 
 stroke: 76                            # optional: piston stroke in mm, for the lower's speed
 ```
 
-## Moves
+The card needs the integration's piston sensors (*Piston Lower …* and *Piston After-Shot …*). The
+numbers quoted below as examples come from the machine the card was developed on (see
+[Background](#background-the-analysis-behind-the-card)). Every machine, seal and grease will give
+different absolute values, so judge your machine by its own trend, not by these numbers.
+
+## Using the card
+
+### Moves
 
 | Button | Byline | What it is |
 |---|---|---|
-| **Lower** | Manual lower from idle | The machine goes from *Idle* straight to *Purge*, e.g. when you lower the piston while cleaning. One value per lower. |
-| **Retraction** | Post-shot retraction, every shot | The full-power retraction right after every shot (*Piston After-Shot* sensors). One value per shot, with history imported from the machine. |
+| **Retraction** | Post-shot retraction, every shot | The full-power retraction right after every shot. One value per shot, with no action from you. Past shots are imported from the machine when the sensors are first set up. |
+| **Lower** | Manual lower from idle | Lowering the piston from idle, e.g. while cleaning. One value per lower, so only available if you lower the piston by hand. |
 
-The purge after a shot (*Click to Purge* → *Purge*) is **not** used. It pushes water through the
-puck and shower screen, so its effort depends on the shot.
+The purge after a shot is **not** used: it pushes water through the puck and shower screen, so its
+effort depends on the shot. The manual raise isn't used either (see
+[Cold starts](#cold-starts-why-the-manual-raise-isnt-used)).
 
-Earlier versions also showed the manual raise and the pre-shot retract. The raise was removed: it is
-noisier than the lower and takes much more current on a cold, rested machine (see *Cold starts*
-below). The pre-shot retract always runs at full drive, so its power reading carries no information.
-
-## Measures
+### Measures
 
 | Button | What it is |
 |---|---|
-| **Current** (A) | Average motor current during the move. **The friction indicator**: the machine drives the piston at a fixed speed (manual moves) or a fixed full drive (retraction), so extra friction shows up as extra current. |
-| **Speed** (mm/s) | Retraction: median speed of the steady part (it drops slightly as friction rises). Lower: stroke ÷ duration (the machine holds this speed, so it barely changes). |
+| **Current** (A) | Motor current during the move. **The friction indicator**: extra friction shows up as extra current (see [How the machine moves the piston](#how-the-machine-moves-the-piston)). |
+| **Speed** (mm/s) | Retraction: the speed of its steady part, which drops slightly as friction rises. Lower: stroke ÷ duration. The machine holds this speed, so it barely changes. |
 
-Time ranges: 15 days, 30 days, 90 days, 6 months or 1 year.
+Time ranges: 15 days, 30 days, 90 days, 6 months or 1 year. The selected move is shown in white,
+Current in blue and Speed in lavender. Yellow and cyan are kept for the grease and descale markers
+(as on the maintenance card), and green/amber/orange for status.
 
-The selected move is shown in white, Current in blue and Speed in lavender. Yellow and cyan are kept for the
-grease and descale markers, as on the maintenance card, and green/amber/orange for status.
-
-## Chart
+### Chart
 
 - **D** (cyan) and **G** (yellow) dashed lines mark logged descales and greases. When both were done
   on the same day, the line alternates both colours and carries both letters.
-- A dashed white **trend line** per maintenance cycle, labelled with its change per month (see
-  *Smoothing and the summary numbers*).
-- **Soon** / **Due** dashed lines: the maintenance levels, when the chart shows the current of the
+- A dashed white **trend line** per maintenance cycle, labelled with its change per month.
+- **Soon** / **Due** dashed lines: your maintenance levels, when the chart shows the current of the
   move the forecast uses.
 - The key under the numbers lists only what is on the chart.
 - Tap or drag the chart to read any point.
 
-## Messages
+### Summary numbers
+
+- **7-day median** (retraction) or **Latest** (lower): the current level. The tapped point when you
+  tap the chart.
+- **Change**: the level now against the level right after the last descale or grease.
+  - Green below 5 %, amber 5–10 %, orange above 10 %. For Speed, a drop counts as worse.
+  - Shows — until there are 3 measurements since the maintenance.
+- **Trend**: how fast the current is rising, as % per month of the level right after the last
+  maintenance. Needs at least 5 measurements over at least 3 days.
+- The caption under *Change* and *Trend* says which period they describe, for example *Since
+  maintenance 22 Oct*. Without any logged maintenance in the last year they cover the last 60 days.
+
+*Change*, *Trend* and the trend lines are worked out per **maintenance cycle** (the stretch between
+two logged descales or greases) over the whole cycle, so they don't change when you pick another
+time range. The stretch before your first logged maintenance gets no trend line, because its start
+is unknown and it may hide a cleaning that wasn't logged. Adding that date to the calendar gives it
+a line too.
+
+### Maintenance levels and forecast
+
+The bottom of the card shows the **maintenance status**, based on the current of the move chosen in
+the gear menu (**Predict from: Retraction / Lower**):
+
+| Status | When |
+|---|---|
+| **OK** (green) | below your *Maintenance soon* level |
+| **Maintenance soon** (amber) | at or above the *Maintenance soon* level: plan to grease/descale |
+| **Maintenance due** (orange) | at or above the *Maintenance due* level: time to grease/descale |
+| **Maintained** (date) | maintenance was logged and there are not yet 3 new measurements |
+
+- **Setting levels:** use the gear menu (− / + in 0.01 A steps). The menu shows the level now and
+  right after the last maintenance, to help you choose.
+- **Suggested levels:** until you set your own, the card suggests levels relative to the level
+  right after the last maintenance:
+
+  | Move | Soon | Due |
+  |---|---|---|
+  | Retraction | +30 % | +50 % |
+  | Lower | +10 % | +15 % |
+
+  On the development machine the retraction rose about 55 % over a full cycle and the lower about a
+  quarter as fast. Adjust the levels once you've seen a full cycle on yours, for example to the
+  level where the piston started to feel or sound rough.
+- **Shared settings:** levels are kept per machine and per move, and shared by every Home Assistant
+  user. Only admins can change them.
+- **The level used:** the 7-day median for the retraction, or the median of the last 3 lowers.
+- **Forecast** ("due in ~N days · ~M shots"):
+  - It extends the trend since the last maintenance to the *Due* level.
+  - Shots per day come from the shot counter over the last 30 days.
+  - If the trend isn't rising, the card says so instead of guessing.
+
+### Logging maintenance
+
+**Log maintenance** asks *What did you do today?* Pick **Descaled**, **Greased** or both.
+
+- **With a calendar:** it adds an all-day event per choice (*Meticulous: Descale* /
+  *Meticulous: Grease piston*) with the current shot count. These are the same events the
+  maintenance card uses, so its counters reset too.
+- **Without a calendar:** the log is kept with the machine's settings. Only admins can do this.
+- The entry becomes the **D**/**G** marker on the chart and starts a new maintenance cycle.
+
+The new cycle starts at the moment you log it: the event description records the time, so shots
+earlier that day still count towards the old cycle. Events you add or move by hand count from midday
+on their date.
+
+### Messages
 
 | On the chart | Meaning |
 |---|---|
@@ -55,206 +123,146 @@ grease and descale markers, as on the maintenance card, and green/amber/orange f
 | **No retraction data** / **No lower data** | The integration doesn't provide the *Piston After-Shot* / *Piston Lower* sensors (yet). |
 | **Nothing in this range** | The sensor exists but has no measurements in the chosen period. Pick a longer range. |
 | **No measurements yet** | Not a single measurement in the last year, e.g. right after setup. |
-| **Loading…** | Waiting for Home Assistant's history (it retries on its own, e.g. after a tablet wakes up). |
+| **Loading…** | Waiting for Home Assistant's history. It retries on its own, e.g. after a tablet wakes up. |
 
-At the bottom, **No forecast** means the move chosen for the forecast has no sensor; pick the other
+At the bottom, **No forecast** means the move chosen for the forecast has no sensor. Pick the other
 one in the gear menu. The forecast defaults to the retraction when its sensor exists, otherwise
 the lower.
 
-## Maintenance levels and forecast
+### Which move to use
 
-The bottom of the card shows the **maintenance status**, based on the current of the move chosen in
-the gear menu (**Predict from: Lower / Retraction**):
+- **Retraction** works for everyone and needs no manual action. It shows maintenance very clearly
+  and has history from day one. Single shots scatter, more so as friction rises, so it is a
+  long-term view: watch the 7-day median and the trend.
+- **Lower** is the more precise single reading. It only exists if you lower the piston by hand
+  (for example while cleaning), and it rises more slowly than the retraction.
 
-| Status | When |
+## How it works
+
+### How the machine moves the piston
+
+- **Manual lowers and raises:** the machine moves the piston at a **fixed speed**. One stroke takes
+  about 13 s every time, at a drive level of about 60–65 %. It adjusts the drive to hold that speed,
+  so extra friction shows up as **more current**, not as a slower move.
+- **The retraction right after a shot:** this runs at **full drive** (−100 %) once the pressure is
+  back at 0 bar. With the drive fixed, extra friction shows up as more current and a slightly lower
+  speed.
+
+### Drive level and friction
+
+The motor's force has to overcome the seal friction plus whatever else the piston is pushing or
+pulling. This has three effects:
+
+- **At high drive**, friction is a small part of the total, so a slow rise in friction is a small
+  change in current.
+- **At lower drive**, the same rise in friction is a larger share of the load.
+- **At very low drive**, the motor's force drops to the friction force and the piston **stalls**.
+
+The stall has been seen directly. In experimental "pop-can" retraction profiles, the piston stopped
+moving at drive levels below about 10 % (in either direction). The exact stall level will depend on
+the machine and on how much friction has built up.
+
+This is why the card uses moves with a fixed, known drive or speed. The comparison between
+measurements then depends on friction, not on how hard the profile happened to drive the piston.
+
+### Cold starts (why the manual raise isn't used)
+
+On the development machine, a manual raise took clearly more current when the machine was **cold
+and had been standing still**:
+
+- After 45 min to 10 h of rest at room temperature: about 15–20 % more than normal.
+- A second raise a minute later: normal again.
+- A raise after a similar rest with the machine still warm: also normal.
+
+A plausible cause is cold seals settling while the machine stands and needing extra breakaway force
+on the first move. A manual lower normally follows a raise, so it doesn't see this effect. That
+makes the lower the cleaner manual measure, and the raise was left out.
+
+### The retraction measure, step by step
+
+Per shot, from the machine's ~10 Hz sensor stream:
+
+1. Use only the retraction **after** the shot, not the one before it.
+2. Keep the samples where all of these hold:
+   - |drive| ≥ 99 %: fixed effort.
+   - Pressure < 0.1 bar: skips the pressure release, which depends on the puck.
+   - Speed ≥ 8 mm/s: steady motion only.
+   - Piston position between 35 and 55 mm: the same stretch of cylinder every shot. Start points
+     vary with the dose, and friction can vary along the bore.
+3. With at least 5 such samples (about 0.5 s), the shot's value is their **median current**. The
+   median speed is the Speed measure.
+
+The integration publishes these as *Piston After-Shot Current* and *Piston After-Shot Speed*. The
+first time the sensors exist, it reads the shots stored on the machine and imports the same values
+into Home Assistant's long-term statistics, so the card has history from the start. The integration
+action `meticulous_espresso.import_shot_history` repeats the import; running it again is safe.
+
+### Data sources
+
+- **Recent measurements** come from the recorder history: one value per move, at the moment it
+  happened.
+- **Older measurements** (beyond the recorder's retention, 10 days by default) come from long-term
+  statistics. These keep hourly means, so two shots within the same hour show as one point.
+- **Repeated values:** identical values within 6 hours are treated as one, because restarts can
+  re-publish the same value.
+- **Loading failures:** if history can't be loaded (e.g. a wall tablet just woke up), the card keeps
+  what it had and retries after 5 s, 10 s, 20 s…
+
+## Background: the analysis behind the card
+
+The card's choices come from the full shot history of one machine: 506 shots from January to
+October 2026, plus a week of manual raises and lowers. The absolute values below are specific to
+that machine. They're here to show why the method was chosen and what a maintenance cycle can look
+like.
+
+### Looking for a measure that works for every user
+
+Manual moves only happen when someone cleans the machine by hand, so a measure taken during normal
+shots was needed. Two candidates were tested on the machine's shot records (motor current, drive,
+speed and position at ~10 Hz).
+
+**Low-drive moves at 0 bar** (the slow fill and pre-brew moves at the start of a shot) were **not
+usable**. Even after correcting for speed, they barely responded to maintenance. During these moves
+the motor also pushes water into the basket, and that load depends on the profile.
+
+**The retraction after every shot** responded **clearly**. Because the drive level is always the
+same, no speed correction is needed. On this machine speed and current followed the motor's own line
+(speed ≈ 11.2 − 1.08 × current).
+
+| On the development machine | Retraction current |
 |---|---|
-| **OK** (green) | below the *Maintenance soon* level |
-| **Maintenance soon** (amber) | at or above the *Maintenance soon* level: plan to grease/descale |
-| **Maintenance due** (orange) | at or above the *Maintenance due* level: time to grease/descale |
-| **Maintained** (date) | maintenance was logged and there are not yet 3 new measurements |
+| Shots with a usable value | 466 of 506 |
+| Same-day shot-to-shot noise | about 0.035 A, rising to about 0.08 A when friction was high |
+| Drop at a maintenance in May | 1.49 → 0.99 A (14× the noise) |
+| Drop at a maintenance in late August | 1.32 → 1.05 A (8× the noise) |
+| After 3+ weeks without use | rose from about 1.1 to 1.3 A |
+| Rise over the following cycle | about 1.0 → 1.6 A (+60 %) |
 
-- **Levels** are set with the gear (− / + in 0.01 A steps). They are stored per machine (shared by
-  every Home Assistant user, see *Where settings are kept*) and per move. Until you set them, the card suggests levels relative to the level right after the
-  last maintenance: **Retraction +30 % / +50 %** (it rose about 55 % over a full maintenance cycle in 2026),
-  **Lower +10 % / +15 %** (it rises about a quarter as fast). These suggestions come from one
-  machine, so adjust them once you've seen a full cycle on yours.
-- The **current level** is the 7-day median for the retraction and the median of the last 3 lowers.
-- The **forecast** ("due in ~N days · ~M shots") extends the trend since the last maintenance (a
-  least-squares line through the individual points, at least 5 points over at least 3 days) to the
-  *Maintenance due* level. Shots per day come from the shot counter over the last 30 days. If the trend
-  isn't rising, the card says so instead of guessing.
-- When the chart shows the current of the move used for the forecast, the two levels are drawn as
-  dashed lines (**Soon** amber, **Due** orange). Levels you set are drawn even before there are
-  enough measurements for a status; suggested levels appear once there are.
-- The gear menu shows the level now and right after the last maintenance, and whether the levels
-  are suggested or your own.
+Some other observations:
+- **Lubrication along the stroke:** right after greasing the current was flat along the stroke.
+  Later it varied along the stroke and between shots, which fits uneven lubrication.
+- **Temperature correction:** this was tried and didn't reduce the scatter reliably, so the card
+  smooths with a 7-day median instead.
+- **Not pure friction:** the retraction may include a little suction through the puck. It still
+  tracked maintenance far better than anything else in the data.
 
-## Logging maintenance
+### Retraction against manual moves
 
-**Log maintenance** asks *What did you do today?* with **Descaled** and **Greased** (pick one or both),
-then adds an all-day event per choice to the maintenance calendar: *Meticulous: Descale* and/or
-*Meticulous: Grease piston*, with the current shot count. These are the same events the maintenance
-card uses, so its counters reset too. Without a calendar, the card keeps the log with the machine's
-settings. The new event becomes the **D**/**G** marker on the chart and starts a new maintenance cycle
-for *Change*, *Trend* and the forecast. Without a calendar the dialog says *Saved with this
-machine's settings*, with a calendar it names the calendar it adds to.
+Over eight days with both manual and shot data, each measure was fitted with a straight line, and the
+scatter around that line was taken as its noise:
 
-The new cycle starts at the moment you logged it: the event description records the time
-(*Logged 2026-10-22 21:15*), so shots earlier that day stay in the old cycle. Events you add or move
-by hand count from midday on their date.
+| Measure (development machine) | Scatter around the trend | Days to see a change of 2× the scatter |
+|---|---|---|
+| Lower, current | 19 mA | about 3 |
+| Raise (warm, cold starts left out), current | 27 mA | about 7 |
+| Retraction, current, single shots | 200 mA | about 16 |
 
-## How the machine moves the piston (what the data shows)
+The lower gives the sharpest short-term reading and the raise adds little on top of it. The
+retraction is noisier shot to shot, but it is the only measure every user gets, and it shows
+maintenance most clearly over weeks and months.
 
-- Every manual raise and lower takes almost exactly the same time: **12.7–13.1 s** in October 2026.
-  The machine drives the piston at a fixed speed, so extra friction shows up as **more current**,
-  not as a slower move. Average drive level sits around 62–65 % and hardly moves.
-- The post-shot retraction runs at full drive (−100 %), so extra friction shows up as more current
-  and a slightly lower speed.
+### Time or shot count?
 
-## Cold starts (why the manual raise was dropped)
-
-A manual raise took clearly more current when the machine was **cold and had been standing still**
-(1.46–1.54 A at 22–24 °C after 45 min to 10 h of rest, against 1.22–1.33 A normally). A raise one
-minute after another at the same cold temperature was normal (1.28 A), and so was a raise after
-46 minutes at 30 °C. A plausible cause is cold seals that settle while standing and need extra
-breakaway force on the first move. The manual lower always follows a raise during cleaning, so it
-never sees this effect, which is one reason it is the cleaner manual measure.
-
-## Drive level and how visible friction is (working hypothesis)
-
-The force the motor delivers has to cover the piston's normal load plus seal friction. At a high
-drive level friction is a small part of the total and a slow rise hides in the noise; at a lower
-drive level the same rise stands out more; at a very low drive level the drive force can drop to the
-friction force and the piston would stop. Not confirmed against the firmware.
-
-## Smoothing and the summary numbers
-
-- **Line**: a running median, so single odd measurements don't pull it around. Retraction: the
-  median of all shots within ±3.5 days (a 7-day median), over small dots for the individual shots,
-  broken over gaps of more than a week. Lower: the median of 3 consecutive measurements.
-- **Latest** / **7-day median**: the latest lower, or the current 7-day median of the retraction.
-  Tap or drag the chart to inspect any point.
-- **Maintenance cycles**: the stretches between logged descales and greases. *Change*, *Trend* and
-  the dashed trend lines are worked out per cycle over the whole cycle, not over the visible part,
-  so they stay the same whichever time range you pick. The caption under *Change* and *Trend* says
-  which cycle they describe (*Since maintenance 22 Oct*, or *Over the last 60 days*).
-- **Change**: the current level against the level right after the last descale or grease
-  (retraction: 7-day medians, the first week against the last week; lower: the median of the first
-  three against the last three), the same levels the forecast uses. Green below 5 %, amber 5–10 %,
-  orange above 10 % (for Speed, a drop counts as worse). Shows — until there are 3 measurements
-  since the maintenance.
-- **Trend**: least-squares slope through the cycle's individual measurements, as % per month of the
-  level right after the maintenance. Needs at least 5 measurements over at least 3 days.
-- **Trend lines**: one dashed line per cycle, labelled with its % per month when there is room.
-  Before the first logged maintenance there is no line: its start is unknown and it may hide a
-  cleaning that wasn't logged (for example a drop in the data with no event in the calendar). Logging that date in the calendar
-  gives it a line too.
-- Without any logged maintenance in the last year, *Change* and *Trend* cover the last 60 days, the
-  same window the forecast uses.
-- Shot count was also tested as the x-axis instead of time. It fitted no better, and over a 25-day
-  break without shots the retraction current still rose from 1.05 to 1.29 A. Friction rises with
-  time and standing still as well as with use, so the card keeps time on the axis.
-
-## Which measure to watch (comparison, 15–22 October 2026)
-
-Over the eight days with manual raise and lower data, each measure was fitted with a straight line.
-The leftover scatter around that line is the noise:
-
-| Measure | Points | Rise | Scatter around the trend | Days to see a change of 2× the scatter |
-|---|---|---|---|---|
-| **Lower**, current | 15 | +13 mA/day | 19 mA | **about 3** |
-| **Raise** (warm, cold starts left out), current | 12 | +8 mA/day | 27 mA | about 7 |
-| **Retraction**, current, single shots | 19 | +25 mA/day | 200 mA | about 16 |
-| **Retraction**, current, daily median | 8 | +19 mA/day | 170 mA | about 19 |
-
-- **Lower is currently the cleanest indicator.** It always runs right after a raise during cleaning,
-  so the piston has just moved and is warm. That makes every lower a similar, repeatable test. It is
-  also the only measured move in the pushing direction.
-- **Raise adds little on top of Lower.** It is noisier, sensitive to cold starts and rises more
-  slowly, so it was removed from the card.
-- **Retraction is the only measure without any manual action, and the only one with history.** It
-  shows maintenance most clearly (steps of 0.27–0.50 A in May and August). But the scatter between
-  shots grows as friction rises: about 15 mA shortly after maintenance (May–June), about 80 mA (median
-  deviation) since mid-September. The first shot of a session tends to read lower than the second,
-  and lower when the bottom of the brew chamber is warmer. A temperature correction was tested and
-  did not reduce the scatter reliably, so the card relies on the 7-day median instead. The growing
-  scatter is itself a sign of uneven lubrication.
-
-In short: use **Lower** for a quick, precise reading after cleaning, and **Retraction** for the long
-view and for users who rarely clean manually.
-
-## Data sources
-
-- Recent measurements come from the recorder history: one value per move, exactly when it happened.
-- Older ones (beyond the recorder's retention, 10 days by default) come from long-term statistics,
-  which only keep hourly means. Cold-start detection uses state history, so it only works for moves
-  still in recent history.
-- Identical repeated values within 6 hours are treated as one, because restarts can re-publish the
-  same value.
-- If history can't be loaded (e.g. a wall tablet just woke up), the card keeps what it had and
-  retries after 5 s, 10 s, 20 s… *No measurements yet* only appears when the history really is empty.
-
-## Retraction: a measure for every shot
-
-Manual raises and lowers only happen when you clean the machine. The machine's own shot history
-(`/api/v1/history` on the machine, about 10 samples a second) also records motor current, drive
-level, speed and piston position during every shot. This was analysed for all 506 shots from
-January to October 2026 to find a measure that works for everyone.
-
-**Candidate 1: low-drive moves at 0 bar (below 70 %).** These are mostly the slow fill and pre-brew
-moves at the start of a shot (0.5–4 mm/s, about 10–45 % drive). Even after correcting for speed
-(fitting current = a + b·speed per shot), the result barely responds to maintenance: at most
-about 2× the shot-to-shot noise, with the sign changing between events. At these moves the motor
-also pushes water into the basket and puck, and that load varies with the profile. **Not usable.**
-
-**Candidate 2: the retract after every shot.** As soon as the shot ends, the machine raises the
-piston at **full drive (−100 %)** with the pressure at 0 bar. Because the drive level is always the
-same, no speed recalibration is needed: more friction simply means more current and a lower
-speed, along the motor's own line (speed ≈ 11.2 − 1.08 × current, from the data).
-
-Per shot:
-
-1. take the samples after the shot where pressure < 0.1 bar, drive ≤ −99 % and speed is steady
-   (faster than 8 mm/s upwards);
-2. keep only piston positions 35–55 mm. Almost every shot record covers this window, and current
-   depends a little on position;
-3. the shot's value is the **median current** of those samples (median speed as a cross-check);
-4. plot a 7-day rolling median to smooth shot-to-shot scatter.
-
-Results:
-
-| | Current |
-|---|---|
-| Same-day shot-to-shot noise | 0.035 A |
-| Step at maintenance on 10 May | 1.49 → 0.99 A (14× the noise) |
-| Step at maintenance on 31 Aug | 1.32 → 1.05 A (8× the noise) |
-| After 3+ weeks unused (Jul–Aug) | jumped from about 1.1 to 1.3 A |
-| Now (late October) | about 1.6 A and rising, the highest on record |
-
-Right after greasing, the current is flat along the whole stroke (about 1.0 A everywhere). Now it
-varies along the stroke and between shots, which also fits uneven lubrication. The dates of the
-two steps come from the data (shots just before and after).
-
-The retract after a shot might also include some suction through the puck, so this is not *pure*
-friction. It still tracks maintenance far better than any other measure in the data. It also reacts more
-strongly than the manual raise: from 15–16 to 19–22 October the retract current rose from 1.50 to
-1.62 A (+8 %), the warm manual raises about 4 %. Since the maintenance on 31 August it has risen
-from about 1.0 to 1.6 A (+60 %).
-
-**In the card:** the **Retraction** button shows two measures, **Current** (A) and **Speed** (mm/s).
-With many points (one per shot), the card draws small dots plus a 7-day running median line, broken
-over gaps of more than a week.
-
-**Sensors:** the integration publishes the result once per shot as *Piston After-Shot Current* and
-*Piston After-Shot Speed* (`after_shot.py`). It uses the same filter on the live Socket.IO stream,
-with the pressure taken from the status events.
-
-**History:** the first time the integration starts with these sensors, it reads every shot stored on
-the machine (`/api/v1/history`, three days of shots per request, one request at a time). It
-summarises each shot the same way and imports the results into Home Assistant's long-term
-statistics, one hourly row per hour with shots (`history_import.py`). The card shows the whole history
-straight away instead of starting empty. The import runs once in the background; the service
-`meticulous_espresso.import_shot_history` re-runs it, and repeating it is safe.
-
-Older points come from long-term statistics, so when you pull two shots within the same hour they
-show as one point (their mean).
+Shot count was tried as the x-axis instead of time. It fitted no better, and during a 25-day break
+without shots the retraction current still rose noticeably. Friction builds with time and standing
+still as well as with use, so the card keeps time on the axis.
