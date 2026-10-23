@@ -5,6 +5,11 @@ builds up, it takes more force to move the piston. The card shows that force as 
 over time: it creeps up between maintenance and drops back after greasing or descaling. The card
 also tells you when maintenance is coming up, forecasts when it will be due, and lets you log it.
 
+The card measures **total** friction: lack of grease, scale and coffee residue in the cylinder all
+add to it, and the card can't tell which one it is. It is a tool for setting your own maintenance
+triggers. When in doubt, follow Meticulous's
+[maintenance and repair recommendations](https://meticuloushome.com/pages/maintenance-and-repairs).
+
 ```yaml
 type: custom:meticulous-effort-card
 calendar: calendar.home_maintenance   # optional: "Log maintenance" adds events here (else the machine's own log)
