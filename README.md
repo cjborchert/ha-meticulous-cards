@@ -7,6 +7,8 @@ styled like the machine's own screen. They only need the
 [Meticulous Espresso integration](https://github.com/hessius/ha-meticulous). Calendars and helpers
 are optional extras.
 
+![The Meticulous cards on a dashboard](images/dashboard.jpg)
+
 | Card | What it shows |
 |---|---|
 | `meticulous-shot-card` | The last shot: pressure, flow, weight and piston position, live while brewing |
