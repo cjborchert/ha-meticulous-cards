@@ -1,4 +1,7 @@
-# Piston effort card (`meticulous-effort-card`)
+# Maintenance effort card (`meticulous-maintenance-effort-card`)
+
+The card is titled *Piston effort* on the dashboard. Before 1.1.0 it was called
+`meticulous-effort-card`; that name still works.
 
 The piston is sealed against the brew chamber wall. As the seal's lubrication wears off and scale
 builds up, it takes more force to move the piston. The card shows that force as **motor current**
@@ -11,7 +14,7 @@ triggers. When in doubt, follow Meticulous's
 [maintenance and repair recommendations](https://meticuloushome.com/pages/maintenance-and-repairs).
 
 ```yaml
-type: custom:meticulous-effort-card
+type: custom:meticulous-maintenance-effort-card
 calendar: calendar.home_maintenance   # optional: "Log maintenance" adds events here (else the machine's own log)
 stroke: 76                            # optional: piston stroke in mm, for the lower's speed
 ```
