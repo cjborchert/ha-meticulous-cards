@@ -3,8 +3,8 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 
 Home Assistant dashboard cards for the Meticulous espresso machine,
-styled like the machine's own screen. They only need the
-[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous). A calendar for the
+styled like the machine's own screen. They only need the wonderful
+[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous) made by hessius and a [Meticulous Espresso](https://meticuloushome.com/) machine. A calendar for the
 maintenance log is an optional extra; everything else is set up from the cards themselves.
 
 ![The Meticulous cards on a dashboard](images/dashboard.jpg)
