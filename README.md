@@ -19,6 +19,30 @@ are optional extras.
 | `meticulous-maintenance-card` | Shots since the last descale and grease, with logging |
 | `meticulous-effort-card` | Piston friction over time, maintenance levels and a forecast |
 
+## Maintenance: two cards to choose from
+
+The maintenance cards help you set **your own** maintenance triggers. They don't replace the
+manufacturer's advice: when in doubt, follow Meticulous's
+[maintenance and repair recommendations](https://meticuloushome.com/pages/maintenance-and-repairs).
+
+There are two maintenance cards. Use either one, or both:
+
+| | Maintenance card (`meticulous-maintenance-card`) | Piston effort card (`meticulous-effort-card`) |
+|---|---|---|
+| **What it tracks** | Shots since the last descale and since the last grease | The motor current needed to move the piston, i.e. piston friction |
+| **When it says maintenance is due** | After the number of shots you set for each | When friction reaches the levels you set, with a forecast in days and shots |
+| **Needs** | The shot counter | The integration's piston sensors |
+| **Best for** | A simple, predictable schedule | Maintenance based on the machine's actual condition |
+
+**Neither card can tell you *what* needs doing:**
+- The maintenance card only counts shots. It doesn't measure the machine's condition.
+- The piston effort card measures **total** friction. Running out of grease, scale build-up and
+  coffee residue in the cylinder all add to that friction, and the card can't tell them apart.
+
+When either card says maintenance is due, it's up to you to check whether the piston needs
+greasing, or the cylinder needs descaling or cleaning of coffee residue. Log what you did on the
+card: that resets the counter, or starts a new friction cycle.
+
 ## Requirements
 
 - The [Meticulous Espresso integration](https://github.com/hessius/ha-meticulous).
