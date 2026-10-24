@@ -10,7 +10,7 @@
  * pressure_max: 12
  * weight_max: 55                     # grows automatically if the shot is heavier
  */
-const MSC_VERSION = "1.5.1";
+const MSC_VERSION = "1.6.1";
 // Seconds as "47.0 s" below a minute, "7:14" from a minute on.
 // Short "when" label for a shot: 08:41 today, otherwise MON 08:41 (this week) or 12 OCT
 function mscWhen(ms) {
@@ -70,6 +70,7 @@ class MeticulousShotCard extends HTMLElement {
       flow: `sensor.${p}_flow_rate`,
       weight: `sensor.${p}_shot_weight`,
       profile: `sensor.${p}_active_profile`,
+      timer: `sensor.${p}_shot_timer`,
       piston: `sensor.${p}_piston_position`,
       pistonAlt: null,   // set on the first update: the piston sensor on the same device, if it has another name
     };
@@ -173,7 +174,7 @@ class MeticulousShotCard extends HTMLElement {
       }
       }
       if (this._shot && this._shot.start === shotStart && this._shot.complete) { this._render(); return; } // already have it
-      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
+      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.timer, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
       const h = await this._hass.callWS({
         type: "history/history_during_period",
         start_time: new Date(shotStart - 1000).toISOString(),
@@ -197,12 +198,34 @@ class MeticulousShotCard extends HTMLElement {
         if (out.length) out.push([dur, out[out.length - 1][1]]);
         return out;
       };
+      // Stretches without any reading from the machine (Home Assistant missed its updates, e.g. a stalled
+      // connection). The shot timer updates several times a second while brewing, so a pause of more than
+      // 8 s means data is missing, not that nothing changed.
+      const upd = [];
+      for (const id of [this._e.timer, this._e.pressure, this._e.flow, this._e.weight])
+        for (const r of h[id] || []) upd.push(((r.lu || r.lc) * 1000 - shotStart) / 1000);
+      upd.sort((a, b) => a - b);
+      const gaps = [];
+      let lastT = 0;
+      for (const t of upd) { if (t > 0 && t - lastT > 8) gaps.push([lastT, Math.min(t, dur)]); if (t > lastT) lastT = Math.min(t, dur); }
+      if (dur - lastT > 8) gaps.push([lastT, dur]);
       const prof = (h[this._e.profile] || []).filter((r) => r.s && r.s !== "unavailable" && r.s !== "unknown");
-      const flow = series(this._e.flow, 0);
-      const pressure = series(this._e.pressure, 0);
-      const weight = series(this._e.weight, 0);
+      let flow = series(this._e.flow, 0);
+      let pressure = series(this._e.pressure, 0);
+      let weight = series(this._e.weight, 0);
       let piston = series(this._e.piston);
       if (!piston.length) piston = series(this._e.pistonAlt);
+      // Data missing up to the end: the real end of the shot is unknown, and readings that arrive once the
+      // connection recovers are from after the shot. Show the shot up to the gap, then a "no data" stretch.
+      let shown = dur, cutAt = null;
+      const tail = gaps.length && gaps[gaps.length - 1][1] >= dur - 2 ? gaps[gaps.length - 1] : null;
+      if (tail) {
+        cutAt = tail[0];
+        shown = Math.max(cutAt * 1.4, cutAt + 10);
+        tail[1] = shown;
+        const trim = (arr) => { const o = arr.filter((q) => q[0] <= cutAt); if (o.length) o.push([cutAt, o[o.length - 1][1]]); return o; };
+        flow = trim(flow); pressure = trim(pressure); weight = trim(weight); piston = trim(piston);
+      }
       // Weight at the end of the shot (skip the last re-tare reading if it collapsed to 0)
       let finalW = 0;
       for (const p of weight) if (p[1] > finalW) finalW = p[1];
@@ -211,10 +234,12 @@ class MeticulousShotCard extends HTMLElement {
       if (!win && this._selIdx) return;        // an older shot was picked meanwhile
       this._shot = {
         start: shotStart,
-        duration: dur,
+        duration: shown,
+        cut: cutAt,
         profile: prof.length ? prof[0].s : (this._hass.states[this._e.profile] || {}).state || "",
         flow, pressure, weight, piston,
         final_weight: finalW,
+        gaps,
         complete: true,
       };
       this._empty = false;
@@ -234,6 +259,19 @@ class MeticulousShotCard extends HTMLElement {
         if (w === "latest") { if (!this._selIdx) this._fetch(); } else if (this._selIdx) this._fetch(w);
       }
     }
+  }
+
+  // No reading from the machine for more than 8 s during a shot (the shot timer alone updates several times
+  // a second), e.g. because the connection between Home Assistant and the machine stalled
+  _stale() {
+    const st = this._hass && this._hass.states;
+    if (!st) return false;
+    let last = 0;
+    for (const id of [this._e.timer, this._e.pressure, this._e.flow, this._e.weight]) {
+      const e = st[id];
+      if (e) last = Math.max(last, new Date(e.last_updated).getTime());
+    }
+    return last > 0 && Date.now() - last > 8000;
   }
 
   _live(hass) {
@@ -298,6 +336,7 @@ class MeticulousShotCard extends HTMLElement {
         #chart { touch-action: pan-y; cursor: crosshair; user-select: none; -webkit-user-select: none; }
         svg { display: block; width: 100%; height: auto; }
         .lbl { fill: #dce9ff; font-weight: 700; font-size: 18px; }
+        .gap { fill: #8fa3b8; font-weight: 700; font-size: 14px; letter-spacing: 2px; }
         .lbl .u { fill: #8fa3b8; }
         /* legend sits under the plot area, left-aligned columns like the machine */
         .legend { display: grid; grid-template-columns: auto auto auto; justify-content: space-between; column-gap: 10px; margin: -2px 17% 0 20.5%; text-align: left; }
@@ -362,8 +401,18 @@ class MeticulousShotCard extends HTMLElement {
       if (!arr.length) return "";
       // while live, hold the latest reading out to "now"
       const pts = !s.complete && arr[arr.length - 1][0] < dur ? arr.concat([[dur, arr[arr.length - 1][1]]]) : arr;
-      return pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1], max).toFixed(1)}`).join("");
+      // no line across a stretch without data
+      const cut = (a, b) => (s.gaps || []).some(([g0, g1]) => a <= g0 + 0.01 && b >= g1 - 0.01);
+      return pts.map((p, i) => `${i && !cut(pts[i - 1][0], p[0]) ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1], max).toFixed(1)}`).join("");
     };
+    // Live, but no reading from the machine for a while: say so rather than draw stale values
+    const stale = !s.complete && this._stale();
+    const gapSvg = (s.gaps || []).map(([g0, g1]) => {
+      const x0 = x(g0), x1 = x(g1), w = Math.max(x1 - x0, 2);
+      return `<rect x="${x0.toFixed(1)}" y="${T}" width="${w.toFixed(1)}" height="${B - T}" fill="url(#gaphatch)" opacity=".55"/>` +
+        (w > 70 ? `<text class="gap" x="${((x0 + x1) / 2).toFixed(1)}" y="${(T + B) / 2}" text-anchor="middle">NO DATA</text>` : "");
+    }).join("");
+    const note = stale ? "WAITING FOR MACHINE DATA" : (s.gaps || []).length ? "HOME ASSISTANT MISSED PART OF THIS SHOT" : "";
     const grid = [];
     for (let i = 0; i <= 5; i++) {
       const gy = T + (i * (B - T)) / 6;
@@ -376,12 +425,16 @@ class MeticulousShotCard extends HTMLElement {
           <linearGradient id="pg" x1="0" y1="1" x2="0" y2="0">
             <stop offset="0" stop-color="#38d6ff"/><stop offset="1" stop-color="#9dffb0"/>
           </linearGradient>
+          <pattern id="gaphatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="10" height="10" fill="#0b1118"/><line x1="0" y1="0" x2="0" y2="10" stroke="#3a434d" stroke-width="3"/>
+          </pattern>
           <filter id="glow" x="-5%" y="-5%" width="110%" height="110%">
             <feGaussianBlur stdDeviation="1.6" result="b"/>
             <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
         ${grid.join("")}
+        ${gapSvg}
         <line x1="${R}" x2="${R}" y1="${T}" y2="${B}" stroke="#4f6a8f" stroke-width="2" stroke-dasharray="3 6"/>
         <line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#24476e" stroke-width="3"/>
         <!-- piston position indicator (machine style: rod + bar) -->
@@ -394,9 +447,10 @@ class MeticulousShotCard extends HTMLElement {
         </g>
         <text class="lbl" id="tl" y="${T - 14}"></text>
         <text class="lbl" x="${R + 6}" y="${T - 12}">${s.final_weight.toFixed(1)}<tspan class="u"> g</tspan></text>
-        <text class="lbl" x="${R + 18}" y="${B + 30}">${mscTime(s.duration, 1)}</text>
+        <text class="lbl" x="${R + 18}" y="${B + 30}">${s.cut != null ? `${mscTime(s.cut, 1)}+` : mscTime(s.duration, 1)}</text>
         <line id="cl" y1="${T - 6}" y2="${B + 2}" stroke="#ff5a36" stroke-width="3.5"/>
         <path id="ct" fill="#ff5a36"/>
+        ${note ? `<text class="gap" x="${(L + R) / 2}" y="${T + 22}" text-anchor="middle" style="fill:${stale ? "#ffb347" : "#8fa3b8"}">${note}</text>` : ""}
       </svg>`;
     this._updateCursor();
 
