@@ -31,7 +31,7 @@ different absolute values, so judge your machine by its own trend, not by these 
 | Button | Byline | What it is |
 |---|---|---|
 | **Retraction** | Post-shot retraction, every shot | The full-power retraction right after every shot. One value per shot, with no action from you. Past shots are imported from the machine when the sensors are first set up. |
-| **Lower** | Manual lower from idle | Lowering the piston from idle, e.g. while cleaning. One value per lower, so only available if you lower the piston by hand. |
+| **Lower** | Lower from idle, manual | Lowering the piston from idle, e.g. while cleaning. One value per lower, so only available if you lower the piston by hand. |
 
 The purge after a shot is **not** used: it pushes water through the puck and shower screen, so its
 effort depends on the shot. The manual raise isn't used either (see
@@ -42,7 +42,7 @@ effort depends on the shot. The manual raise isn't used either (see
 | Button | What it is |
 |---|---|
 | **Current** (A) | Motor current during the move. **The friction indicator**: extra friction shows up as extra current (see [How the machine moves the piston](#how-the-machine-moves-the-piston)). |
-| **Speed** (mm/s) | Retraction: the speed of its steady part, which drops slightly as friction rises. Lower: stroke ÷ duration. The machine holds this speed, so it barely changes. |
+| **Speed** (mm/s) | Retraction: the speed of its steady part, which drops slightly as friction rises. Greyed out for the lower: the machine lowers the piston at a fixed speed, so its speed says nothing about friction. |
 
 Time ranges: 15 days, 30 days, 90 days, 6 months or 1 year. The selected move is shown in white,
 Current in blue and Speed in lavender. Yellow and cyan are kept for the grease and descale markers
@@ -60,15 +60,20 @@ Current in blue and Speed in lavender. Yellow and cyan are kept for the grease a
 
 ### Summary numbers
 
-- **7-day median** (retraction) or **Latest** (lower): the current level. The tapped point when you
-  tap the chart.
+- **Now**: the current level, the 7-day median for the retraction or the latest lower. When you tap
+  the chart it shows the tapped point instead, with its date.
 - **Change**: the level now against the level right after the last descale or grease.
   - Green below 5 %, amber 5–10 %, orange above 10 %. For Speed, a drop counts as worse.
   - Shows — until there are 3 measurements since the maintenance.
 - **Trend**: how fast the current is rising, as % per month of the level right after the last
   maintenance. Needs at least 5 measurements over at least 3 days.
-- The caption under *Change* and *Trend* says which period they describe, for example *Since
-  maintenance 22 Oct*. Without any logged maintenance in the last year they cover the last 60 days.
+- The line under *Change* and *Trend* says which period they describe, for example *since 22 Oct*
+  (the last logged maintenance). Without any logged maintenance in the last year they cover the
+  last 60 days.
+- **The line on the chart** is smoothed the same way for every time range: a 7-day running median
+  for the retraction, a running median of 3 lowers for the lower. The window never reaches across a
+  logged maintenance, so the drop after greasing or descaling shows as a clean step instead of a
+  slope.
 
 *Change*, *Trend* and the trend lines are worked out per **maintenance cycle** (the stretch between
 two logged descales or greases) over the whole cycle, so they don't change when you pick another
