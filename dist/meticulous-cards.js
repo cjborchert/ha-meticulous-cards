@@ -1,5 +1,5 @@
 // src/meticulous-shot-card.js
-var MSC_VERSION = "1.5.1";
+var MSC_VERSION = "1.6.1";
 function mscWhen(ms) {
   const d = new Date(ms), now = /* @__PURE__ */ new Date();
   if (d.toDateString() === now.toDateString()) return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -32,6 +32,7 @@ var MeticulousShotCard = class extends HTMLElement {
       flow: `sensor.${p}_flow_rate`,
       weight: `sensor.${p}_shot_weight`,
       profile: `sensor.${p}_active_profile`,
+      timer: `sensor.${p}_shot_timer`,
       piston: `sensor.${p}_piston_position`,
       pistonAlt: null
       // set on the first update: the piston sensor on the same device, if it has another name
@@ -161,7 +162,7 @@ var MeticulousShotCard = class extends HTMLElement {
         this._render();
         return;
       }
-      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
+      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.timer, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
       const h = await this._hass.callWS({
         type: "history/history_during_period",
         start_time: new Date(shotStart - 1e3).toISOString(),
@@ -185,12 +186,39 @@ var MeticulousShotCard = class extends HTMLElement {
         if (out.length) out.push([dur, out[out.length - 1][1]]);
         return out;
       };
+      const upd = [];
+      for (const id of [this._e.timer, this._e.pressure, this._e.flow, this._e.weight])
+        for (const r of h[id] || []) upd.push(((r.lu || r.lc) * 1e3 - shotStart) / 1e3);
+      upd.sort((a, b) => a - b);
+      const gaps = [];
+      let lastT = 0;
+      for (const t of upd) {
+        if (t > 0 && t - lastT > 8) gaps.push([lastT, Math.min(t, dur)]);
+        if (t > lastT) lastT = Math.min(t, dur);
+      }
+      if (dur - lastT > 8) gaps.push([lastT, dur]);
       const prof = (h[this._e.profile] || []).filter((r) => r.s && r.s !== "unavailable" && r.s !== "unknown");
-      const flow = series(this._e.flow, 0);
-      const pressure = series(this._e.pressure, 0);
-      const weight = series(this._e.weight, 0);
+      let flow = series(this._e.flow, 0);
+      let pressure = series(this._e.pressure, 0);
+      let weight = series(this._e.weight, 0);
       let piston = series(this._e.piston);
       if (!piston.length) piston = series(this._e.pistonAlt);
+      let shown = dur, cutAt = null;
+      const tail = gaps.length && gaps[gaps.length - 1][1] >= dur - 2 ? gaps[gaps.length - 1] : null;
+      if (tail) {
+        cutAt = tail[0];
+        shown = Math.max(cutAt * 1.4, cutAt + 10);
+        tail[1] = shown;
+        const trim = (arr) => {
+          const o = arr.filter((q) => q[0] <= cutAt);
+          if (o.length) o.push([cutAt, o[o.length - 1][1]]);
+          return o;
+        };
+        flow = trim(flow);
+        pressure = trim(pressure);
+        weight = trim(weight);
+        piston = trim(piston);
+      }
       let finalW = 0;
       for (const p of weight) if (p[1] > finalW) finalW = p[1];
       const endW = weight.length ? weight[weight.length - 1][1] : 0;
@@ -198,13 +226,15 @@ var MeticulousShotCard = class extends HTMLElement {
       if (!win && this._selIdx) return;
       this._shot = {
         start: shotStart,
-        duration: dur,
+        duration: shown,
+        cut: cutAt,
         profile: prof.length ? prof[0].s : (this._hass.states[this._e.profile] || {}).state || "",
         flow,
         pressure,
         weight,
         piston,
         final_weight: finalW,
+        gaps,
         complete: true
       };
       this._empty = false;
@@ -226,6 +256,18 @@ var MeticulousShotCard = class extends HTMLElement {
         } else if (this._selIdx) this._fetch(w);
       }
     }
+  }
+  // No reading from the machine for more than 8 s during a shot (the shot timer alone updates several times
+  // a second), e.g. because the connection between Home Assistant and the machine stalled
+  _stale() {
+    const st = this._hass && this._hass.states;
+    if (!st) return false;
+    let last = 0;
+    for (const id of [this._e.timer, this._e.pressure, this._e.flow, this._e.weight]) {
+      const e = st[id];
+      if (e) last = Math.max(last, new Date(e.last_updated).getTime());
+    }
+    return last > 0 && Date.now() - last > 8e3;
   }
   _live(hass) {
     const b = hass.states[this._e.brewing];
@@ -303,6 +345,7 @@ var MeticulousShotCard = class extends HTMLElement {
         #chart { touch-action: pan-y; cursor: crosshair; user-select: none; -webkit-user-select: none; }
         svg { display: block; width: 100%; height: auto; }
         .lbl { fill: #dce9ff; font-weight: 700; font-size: 18px; }
+        .gap { fill: #8fa3b8; font-weight: 700; font-size: 14px; letter-spacing: 2px; }
         .lbl .u { fill: #8fa3b8; }
         /* legend sits under the plot area, left-aligned columns like the machine */
         .legend { display: grid; grid-template-columns: auto auto auto; justify-content: space-between; column-gap: 10px; margin: -2px 17% 0 20.5%; text-align: left; }
@@ -369,8 +412,15 @@ var MeticulousShotCard = class extends HTMLElement {
     const path = (arr, max) => {
       if (!arr.length) return "";
       const pts = !s.complete && arr[arr.length - 1][0] < dur ? arr.concat([[dur, arr[arr.length - 1][1]]]) : arr;
-      return pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1], max).toFixed(1)}`).join("");
+      const cut = (a, b) => (s.gaps || []).some(([g0, g1]) => a <= g0 + 0.01 && b >= g1 - 0.01);
+      return pts.map((p, i) => `${i && !cut(pts[i - 1][0], p[0]) ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1], max).toFixed(1)}`).join("");
     };
+    const stale = !s.complete && this._stale();
+    const gapSvg = (s.gaps || []).map(([g0, g1]) => {
+      const x0 = x(g0), x1 = x(g1), w = Math.max(x1 - x0, 2);
+      return `<rect x="${x0.toFixed(1)}" y="${T}" width="${w.toFixed(1)}" height="${B - T}" fill="url(#gaphatch)" opacity=".55"/>` + (w > 70 ? `<text class="gap" x="${((x0 + x1) / 2).toFixed(1)}" y="${(T + B) / 2}" text-anchor="middle">NO DATA</text>` : "");
+    }).join("");
+    const note = stale ? "WAITING FOR MACHINE DATA" : (s.gaps || []).length ? "HOME ASSISTANT MISSED PART OF THIS SHOT" : "";
     const grid = [];
     for (let i = 0; i <= 5; i++) {
       const gy = T + i * (B - T) / 6;
@@ -383,12 +433,16 @@ var MeticulousShotCard = class extends HTMLElement {
           <linearGradient id="pg" x1="0" y1="1" x2="0" y2="0">
             <stop offset="0" stop-color="#38d6ff"/><stop offset="1" stop-color="#9dffb0"/>
           </linearGradient>
+          <pattern id="gaphatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="10" height="10" fill="#0b1118"/><line x1="0" y1="0" x2="0" y2="10" stroke="#3a434d" stroke-width="3"/>
+          </pattern>
           <filter id="glow" x="-5%" y="-5%" width="110%" height="110%">
             <feGaussianBlur stdDeviation="1.6" result="b"/>
             <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
         ${grid.join("")}
+        ${gapSvg}
         <line x1="${R}" x2="${R}" y1="${T}" y2="${B}" stroke="#4f6a8f" stroke-width="2" stroke-dasharray="3 6"/>
         <line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#24476e" stroke-width="3"/>
         <!-- piston position indicator (machine style: rod + bar) -->
@@ -401,9 +455,10 @@ var MeticulousShotCard = class extends HTMLElement {
         </g>
         <text class="lbl" id="tl" y="${T - 14}"></text>
         <text class="lbl" x="${R + 6}" y="${T - 12}">${s.final_weight.toFixed(1)}<tspan class="u"> g</tspan></text>
-        <text class="lbl" x="${R + 18}" y="${B + 30}">${mscTime(s.duration, 1)}</text>
+        <text class="lbl" x="${R + 18}" y="${B + 30}">${s.cut != null ? `${mscTime(s.cut, 1)}+` : mscTime(s.duration, 1)}</text>
         <line id="cl" y1="${T - 6}" y2="${B + 2}" stroke="#ff5a36" stroke-width="3.5"/>
         <path id="ct" fill="#ff5a36"/>
+        ${note ? `<text class="gap" x="${(L + R) / 2}" y="${T + 22}" text-anchor="middle" style="fill:${stale ? "#ffb347" : "#8fa3b8"}">${note}</text>` : ""}
       </svg>`;
     this._updateCursor();
     if (!this._listening) {
@@ -1157,7 +1212,7 @@ if (!customElements.get("meticulous-heatup-card")) {
 }
 
 // src/meticulous-cards.js
-var MC_VERSION = "3.5.0";
+var MC_VERSION = "3.6.0";
 var MC_STORE_KEY = "meticulous-cards";
 var MC_SYS = null;
 var MC_SYS_LOADING = null;
@@ -1228,6 +1283,7 @@ async function mcMSave(hass, prefix, patch) {
   MC_SYS = next;
   return next.machines[id];
 }
+var MC_GEAR_SVG = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64z"/></svg>`;
 var MC_PULSE_MS = 2200;
 var MC = {
   blue: "#3a9bff",
@@ -1505,9 +1561,13 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
       } else if (machine === "Purge") {
         this._histUp = false;
         this._histLive = true;
+      } else if (machine === "Idle" && this._lastMachine !== void 0) {
+        clearTimeout(this._resyncT);
+        this._resyncT = setTimeout(() => this._resync(), 5e3);
       }
       this._lastMachine = machine;
     }
+    if (first) mcOnWake(this, () => this._resync());
     const brewing = this._s(this._e.brewing);
     if (brewing === "on" && this._lastBrewing === "off") {
       this._dirty = (this._dirty || 0) + 1;
@@ -1524,7 +1584,16 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
     const pid = this._posId();
     const pos = pid ? this._n(pid) : null;
     const up = this._pistonUp(pos);
-    const key = `${machine}|${up}|${pos === null ? "" : Math.round(pos * 2) / 2}|${this._dirty}|${this._reminderOn()}|${this._inShot}|${timer}`;
+    const stale = this._stale();
+    if (this._s(this._e.brewing) === "on" && !this._staleT) this._staleT = setInterval(() => {
+      this._key = null;
+      this.hass = this._hass;
+    }, 4e3);
+    else if (this._s(this._e.brewing) !== "on" && this._staleT) {
+      clearInterval(this._staleT);
+      this._staleT = null;
+    }
+    const key = `${machine}|${up}|${pos === null ? "" : Math.round(pos * 2) / 2}|${this._dirty}|${this._reminderOn()}|${this._inShot}|${timer}|${stale}`;
     if (key === this._key) return;
     const stateKey = key.split("|").filter((_, i) => i !== 2).join("|");
     const now = Date.now();
@@ -1541,7 +1610,7 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
     this._key = key;
     this._stateKey = stateKey;
     this._lastDraw = now;
-    this._update(machine, up, pos);
+    this._update(machine, up, pos, stale);
   }
   _build() {
     this._built = true;
@@ -1554,7 +1623,8 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
         #status { white-space: nowrap; letter-spacing: 1px; }
         .act { font-weight: 700; font-size: 20px; letter-spacing: 1px; line-height: 1.15; margin: 2px 0 6px; }
         .tap { display: block; width: 100%; box-sizing: border-box; border-radius: 16px; padding: 4px; transition: transform .1s, background .2s; }
-        .tap:active { transform: scale(.97); }
+        .tap.ok:active { transform: scale(.97); }
+        .tap:not(.ok) { cursor: default; }
         .tap.ok:hover { background: rgba(56,224,240,.06); }
         .tap.busy { cursor: not-allowed; opacity: .55; }
         .moving #act { animation: pistpulse ${MC_PULSE_MS / 1e3}s ease-in-out infinite; }
@@ -1572,6 +1642,8 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
                 display: flex; align-items: center; justify-content: center; color: ${MC.dim}; }
         .gear:hover { color: ${MC.label}; background: rgba(255,255,255,.06); }
         .gear svg { width: 18px; height: 18px; }
+        .gear.top { top: 14px; right: 14px; z-index: 1; }
+        ha-card { position: relative; }
         .ask { display: flex; flex-direction: column; align-items: center; gap: 12px; }
         .set { display: none; flex-direction: column; align-items: center; gap: 10px; }
         .over.settings .set { display: flex; }
@@ -1583,6 +1655,7 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
       </style>
       <ha-card>
         <div class="pill">Cleaning</div>
+        <button class="gear top" id="gear2" title="Cleaning reminder">${MC_GEAR_SVG}</button>
         <div class="tap-wrap">
           <button class="tap" id="tap">
             <div class="wrap">
@@ -1641,7 +1714,32 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
       e.stopPropagation();
       this._saveReminder();
     });
-    if (!this._cfg.reminder) r.getElementById("gear").style.display = "none";
+    r.getElementById("gear2").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._openSettings();
+    });
+    if (!this._cfg.reminder) {
+      r.getElementById("gear").style.display = "none";
+      r.getElementById("gear2").style.display = "none";
+    }
+  }
+  _resync() {
+    if (!this._hass) return;
+    this._histLive = void 0;
+    this._cleanLive = false;
+    this._loadHistory();
+    this._loadClean();
+  }
+  // No reading from the machine for more than 12 s while a shot runs: Home Assistant's data is stale
+  _stale() {
+    if (this._s(this._e.brewing) !== "on") return false;
+    const st = this._hass.states, p = this._cfg.prefix;
+    let last = 0;
+    for (const id of [`sensor.${p}_shot_timer`, `sensor.${p}_pressure`, `sensor.${p}_flow_rate`, `sensor.${p}_shot_weight`, this._e.state]) {
+      const e = st[id];
+      if (e) last = Math.max(last, new Date(e.last_updated).getTime());
+    }
+    return last > 0 && Date.now() - last > 12e3;
   }
   // ---- cleaning reminder ----
   _reminderOn() {
@@ -1711,9 +1809,9 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
     this._key = null;
     this.hass = this._hass;
   }
-  _update(machine, up, pos) {
+  _update(machine, up, pos, stale) {
     const r = this.shadowRoot;
-    const ready = ["Idle", "Click to Start", "Finished"].includes(machine) && this._s(this._e.brewing) !== "on";
+    const ready = machine === "Idle" && this._s(this._e.brewing) !== "on";
     const top = this._cfg.piston_top ?? 0, bottom = this._cfg.piston_bottom ?? 76;
     let frac = pos !== null ? (pos - top) / Math.max(bottom - top, 1) : up ? 0 : 1;
     frac = Math.min(Math.max(frac, 0), 1);
@@ -1728,7 +1826,11 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
     if (!ready) this._hideConfirm();
     r.getElementById("pos").textContent = purgeWait ? "Brew complete" : moving ? "Piston moving" : `Piston ${up ? "up" : "down"}`;
     let act, status, dot;
-    if (purgeWait) {
+    if (stale) {
+      act = "NO DATA";
+      status = "Waiting for the machine";
+      dot = MC.grid;
+    } else if (purgeWait) {
       act = "PUSH TO PURGE";
       status = "On the machine";
       dot = MC.cyan;
@@ -1769,6 +1871,14 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
       act = "HEATING";
       status = machine === "Starting..." ? "Starting" : machine;
       dot = MC.orange;
+    } else if (machine === "Click to Start") {
+      act = "READY TO BREW";
+      status = "Start the shot on the machine";
+      dot = MC.orange;
+    } else if (machine === "Finished") {
+      act = "SHOT DONE";
+      status = "Finishing";
+      dot = MC.cyan;
     } else {
       act = "BUSY";
       status = machine;
@@ -1792,10 +1902,7 @@ var MeticulousCleaningCard = class extends mcEl("plunger") {
   }
   _press() {
     if (!this._hass) return;
-    if (!this._ready) {
-      if (this._cfg.reminder) this._openSettings();
-      return;
-    }
+    if (!this._ready) return;
     const dir = this._up ? "lower" : "raise";
     const last = this._lastMove();
     if (last && last.dir !== dir && Date.now() - last.t < 12e4) {
@@ -1939,7 +2046,7 @@ var MeticulousShotCountCard = class extends mcEl("shots") {
     let g = "";
     for (let i = 1; i <= 2; i++) {
       const y = B - i * (B - T) / 2;
-      g += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="${MC.grid}" stroke-dasharray="4 6"/>`;
+      g += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="#3a434d" stroke-width="0.6" stroke-dasharray="3.5 4.5"/>`;
     }
     days.forEach((d, i) => {
       const h = d.n / max * (B - T);
@@ -1950,7 +2057,7 @@ var MeticulousShotCountCard = class extends mcEl("shots") {
       if (d.n) g += `<text class="lbl" x="${(x + w / 2).toFixed(1)}" y="${(B - h - 3).toFixed(1)}" text-anchor="middle" style="fill:${MC.label}">${d.n}</text>`;
       g += `<text class="lbl" x="${(x + w / 2).toFixed(1)}" y="${H - 2}" text-anchor="middle">${wd[new Date(d.t).getDay()]}</text>`;
     });
-    g += `<line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#2f7fff" stroke-width="2"/>`;
+    g += `<line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#24476e" stroke-width="1.5"/>`;
     r.getElementById("bars").innerHTML = `<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
   }
 };
@@ -2353,7 +2460,7 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
       {
         key: "lower",
         label: "Lower",
-        hint: "Manual lower from idle",
+        hint: "Lower from idle, manual",
         ids: {
           current: ["piston_lower_avg_current", "plunger_lower_avg_current"],
           speed: ["piston_lower_duration", "plunger_lower_duration"]
@@ -2459,10 +2566,14 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
         .seg button.on { color: #000; background: var(--c, ${MC.cyan}); border-color: var(--c, ${MC.cyan});
                          box-shadow: 0 0 8px var(--c, ${MC.cyan}); }
         .hint { text-align: center; margin-bottom: 4px; }
+        .selrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 8px; margin: 6px 0 6px; }
+        .selrow .seg { margin: 0; gap: 4px; }
+        .selrow .seg button { font-size: 11px; letter-spacing: .5px; padding: calc(4px + .05em) 9px calc(4px - .05em); }
+        .seg button:disabled { opacity: .3; cursor: default; }
+        .legend .s { font-size: 10px; letter-spacing: 1px; color: ${MC.dim}; text-transform: uppercase; white-space: nowrap; margin-top: 1px; }
         #chart { touch-action: pan-y; cursor: crosshair; user-select: none; -webkit-user-select: none; }
         svg { display: block; width: 100%; height: auto; }
         .ax { fill: ${MC.dim}; font-weight: 700; font-size: 11px; letter-spacing: 1px; }
-        .legend .cap { grid-column: 2 / -1; margin-top: 4px; font-size: 11px; letter-spacing: 1px; color: ${MC.dim}; text-transform: uppercase; }
         .ax.tl { font-size: 15px; fill: ${MC.label}; stroke: #000; stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }
         .legend { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; margin-top: 6px; }
         .legend .n { font-size: 11px; letter-spacing: 1.5px; white-space: nowrap; }
@@ -2498,8 +2609,7 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
       <ha-card>
         <div class="pill">Piston effort</div>
         <button class="gear" id="gear" title="Maintenance levels">${gear}</button>
-        <div class="seg" id="moves"></div>
-        <div class="seg" id="metrics"></div>
+        <div class="selrow"><div class="seg" id="moves"></div><div class="seg" id="metrics"></div></div>
         <div class="sub hint" id="hint"></div>
         <div id="chart"></div>
         <div class="legend" id="legend"></div>
@@ -2595,14 +2705,21 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
         el.appendChild(b);
       }
     };
+    if (this._move === "lower" && this._metric === "speed") this._metric = "current";
     mk("moves", _MeticulousMaintenanceEffortCard.MOVES.map((m) => [m.key, m.label]), this._move, (v) => {
       this._move = v;
+      if (v === "lower") this._metric = "current";
       this._changed();
     }, MC.label);
     mk("metrics", _MeticulousMaintenanceEffortCard.METRICS.map((m) => [m.key, m.label]), this._metric, (v) => {
       this._metric = v;
       this._changed();
     }, metric.colour);
+    const sp = [...r.getElementById("metrics").children][1];
+    if (sp) {
+      sp.disabled = this._move === "lower";
+      sp.title = this._move === "lower" ? "The machine lowers at a fixed speed" : "";
+    }
     mk("ranges", _MeticulousMaintenanceEffortCard.RANGES.map(([l, d]) => [d, l]), this._range, (v) => {
       this._range = v;
       this._changed();
@@ -2719,6 +2836,7 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
       marks = year.filter((m) => m.t >= start);
       cycles = this._cycles(full, bounds, from, end);
       this._marksYear = bounds.length;
+      this._bounds = bounds;
       pred = await this._predict();
     } catch (e) {
       console.warn("meticulous-maintenance-effort-card", e);
@@ -3055,7 +3173,7 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
     let g = "";
     for (let i = 0; i <= 4; i++) {
       const gy = T + i * (B - T) / 4, val = hi - i * (hi - lo) / 4;
-      g += `<line x1="${L}" x2="${R}" y1="${gy}" y2="${gy}" stroke="${MC.grid}" stroke-dasharray="6 8"/>`;
+      if (i < 4) g += `<line x1="${L}" x2="${R}" y1="${gy}" y2="${gy}" stroke="#3a434d" stroke-width="1.2" stroke-dasharray="7 9"/>`;
       g += `<text class="ax" x="${L - 6}" y="${gy + 4}" text-anchor="end">${val.toFixed(metric.dp)}</text>`;
     }
     const fmt = (t) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" }).toUpperCase();
@@ -3080,7 +3198,7 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
         g += `<text class="ax" x="${(x(t) + (both ? i ? 5 : -5 : 0)).toFixed(1)}" y="${T - 8}" text-anchor="middle" style="fill:${c}">${k === "descale" ? "D" : "G"}</text>`;
       });
     }
-    g += `<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="#2f7fff" stroke-width="2.5"/>`;
+    g += `<line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#24476e" stroke-width="3"/>`;
     const cycles = this._cycles_ || [], cyc = cycles[cycles.length - 1];
     let drewTrend = false;
     for (const c of cycles) {
@@ -3094,18 +3212,29 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
         g += `<text class="ax tl" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${c.perMonth >= 0 ? "+" : ""}${c.perMonth.toFixed(1)}%/mo</text>`;
       }
     }
-    const dense = pts.length > 40;
+    const dense = this._move === "retraction";
     const med = (a) => {
       const s = a.slice().sort((p1, p2) => p1 - p2);
       return s[Math.floor(s.length / 2)];
     };
-    const line = pts.map((q, i) => ({
-      t: q.t,
-      v: dense ? med(pts.filter((z) => Math.abs(z.t - q.t) <= 3.5 * 864e5).map((z) => z.v)) : pts.length >= 3 ? med(pts.slice(Math.max(0, Math.min(i - 1, pts.length - 3)), Math.max(0, Math.min(i - 1, pts.length - 3)) + 3).map((z) => z.v)) : q.v
-    }));
+    const bounds = this._bounds || [];
+    const cycleOf = (t) => {
+      let c = 0;
+      for (const b of bounds) if (t >= b) c++;
+      return c;
+    };
+    const cyc_ = pts.map((q) => cycleOf(q.t));
+    const line = pts.map((q, i) => {
+      const same = pts.filter((z, j) => cyc_[j] === cyc_[i]);
+      if (dense) return { t: q.t, v: med(same.filter((z) => Math.abs(z.t - q.t) <= 3.5 * 864e5).map((z) => z.v)) };
+      const k = same.indexOf(q);
+      if (same.length < 3) return { t: q.t, v: q.v };
+      const a = Math.max(0, Math.min(k - 1, same.length - 3));
+      return { t: q.t, v: med(same.slice(a, a + 3).map((z) => z.v)) };
+    });
     this._line = line;
     this._dense = dense;
-    g += `<path d="${line.map((q, i) => `${i && q.t - line[i - 1].t < 7 * 864e5 ? "L" : "M"}${x(q.t).toFixed(1)},${y(q.v).toFixed(1)}`).join("")}" fill="none" stroke="${metric.colour}" stroke-opacity="${dense ? 1 : 0.6}" stroke-width="${dense ? 2.5 : 2}"/>`;
+    g += `<path d="${line.map((q, i) => `${i && q.t - line[i - 1].t < 7 * 864e5 && cyc_[i] === cyc_[i - 1] ? "L" : "M"}${x(q.t).toFixed(1)},${y(q.v).toFixed(1)}`).join("")}" fill="none" stroke="${metric.colour}" stroke-opacity="${dense ? 1 : 0.6}" stroke-width="${dense ? 2.5 : 2}"/>`;
     for (const q of pts) g += dense ? `<circle cx="${x(q.t).toFixed(1)}" cy="${y(q.v).toFixed(1)}" r="2" fill="${metric.colour}" opacity=".45"/>` : `<circle cx="${x(q.t).toFixed(1)}" cy="${y(q.v).toFixed(1)}" r="4" fill="${metric.colour}"/>`;
     g += `<line id="cl" y1="${T - 4}" y2="${B + 2}" stroke="${MC.orange}" stroke-width="3"/><circle id="cp" r="7" fill="none" stroke="${MC.orange}" stroke-width="2.5"/>`;
     this._geom = { W, L, R, T, B, t0, t1, x, y };
@@ -3116,11 +3245,11 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
     const worse = ch == null ? 0 : this._metric === "speed" ? -ch : ch;
     const chCol = ch == null ? MC.dim : worse > 10 ? MC.orange : worse > 5 ? "#ffb347" : MC.green;
     const fromTxt = cyc ? new Date(cyc.from).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
+    const since = !cyc ? "" : this._marksYear ? `since ${fromTxt}` : "last 60 days";
     legend.innerHTML = `
-      <div><div class="n" id="selT">${dense ? "7-day median" : "Latest"}</div><div class="v" id="selV" style="color:${metric.colour}">${latest.toFixed(metric.dp)}${metric.unit}</div></div>
-      <div><div class="n">Change</div><div class="v" style="color:${chCol}">${pct(ch)}</div></div>
-      <div><div class="n">Trend</div><div class="v"${cyc && cyc.perMonth == null ? ` style="color:${MC.dim}"` : ""}>${pct(cyc && cyc.perMonth, "/mo")}</div></div>
-      <div class="cap">${!cyc ? "" : this._marksYear ? `Since maintenance ${fromTxt}` : "Over the last 60 days"}</div>`;
+      <div><div class="n" id="selT">Now</div><div class="s" id="selS">${dense ? "7-day median" : "latest"}</div><div class="v" id="selV" style="color:${metric.colour}">${latest.toFixed(metric.dp)}${metric.unit}</div></div>
+      <div><div class="n">Change</div><div class="s">${since}</div><div class="v" style="color:${chCol}">${pct(ch)}</div></div>
+      <div><div class="n">Trend</div><div class="s">${since}</div><div class="v"${cyc && cyc.perMonth == null ? ` style="color:${MC.dim}"` : ""}>${pct(cyc && cyc.perMonth, "/mo")}</div></div>`;
     const marksIn = (this._marks || []).filter((m) => m.t >= t0 && m.t <= t1);
     const show = {
       key: true,
@@ -3150,7 +3279,9 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
     const idx = pts.indexOf(p), isLast = idx === pts.length - 1;
     const sm = this._line && this._line[idx] ? this._line[idx].v : p.v;
     const selT = this.shadowRoot.getElementById("selT"), selV = this.shadowRoot.getElementById("selV");
-    if (selT) selT.textContent = isLast ? this._dense ? "7-day median" : "Latest" : new Date(p.t).toLocaleDateString("en-GB", { day: "numeric", month: "short" }).toUpperCase();
+    if (selT) selT.textContent = isLast ? "Now" : new Date(p.t).toLocaleDateString("en-GB", { day: "numeric", month: "short" }).toUpperCase();
+    const selS = this.shadowRoot.getElementById("selS");
+    if (selS) selS.textContent = this._dense ? "7-day median" : isLast ? "latest" : "measured";
     if (selV) selV.textContent = `${(this._dense ? sm : p.v).toFixed(metric.dp)}${metric.unit}`;
   }
 };
