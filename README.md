@@ -3,8 +3,8 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 
 Home Assistant dashboard cards for the Meticulous espresso machine,
-styled like the machine's own screen. They only need the wonderful
-[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous) made by hessius and a [Meticulous Espresso](https://meticuloushome.com/) machine. A calendar for the
+styled like the machine's own screen. They only need the
+[Meticulous Espresso integration](https://github.com/hessius/ha-meticulous). A calendar for the
 maintenance log is an optional extra; everything else is set up from the cards themselves.
 
 ![The Meticulous cards on a dashboard](images/dashboard.jpg)
@@ -129,6 +129,9 @@ If a card can't find the machine it says **Machine not found** and which entity 
 
 - Raises or lowers the piston with the integration's *Home* and *Purge* buttons. You confirm each
   move unless you are reversing a move made in the last 2 minutes.
+- The piston can only be moved while the machine is **idle**. From the moment it starts heating until
+  it is idle again (waiting for a shot, brewing, purging), the card is greyed out and tapping it does
+  nothing.
 - The piston graphic follows the **Piston Position** sensor (0 = top, about 76 = bottom), if it is
   enabled. Otherwise it uses the last *Home* or *Purge* state. While the piston moves, a dashed ring
   pulses at its destination.
@@ -137,22 +140,29 @@ If a card can't find the machine it says **Machine not found** and which entity 
   | Machine | Card shows |
   |---|---|
   | Heating / Preheating / Starting | HEATING |
+  | Click to Start | READY TO BREW · start the shot on the machine |
   | Retract and fill before a shot | STARTING SHOT |
   | During the shot | BREWING · *current profile stage* · time |
   | Retract after the shot | SHOT DONE · Retracting · purge next |
   | Click to Purge | PUSH TO PURGE, with the machine's cup animation |
   | Purge, piston still moving | LOWERING… |
   | Purge, piston already at the bottom | DEPRESSURIZING. The machine stays in *Purge* for another 20–30 s while it depressurizes. The card can only detect this with the Piston Position sensor. |
+  | Brewing, but no data from the machine for 12 s | NO DATA · waiting for the machine (see *When Home Assistant misses data*) |
 
 - **Cleaning reminder**: after a shot the status line reads *Clean due · n shots* until the piston
-  is raised. You can turn this off with the gear icon; the setting is kept with the machine's settings
-  (see *Where settings are kept*). Set `reminder: false` to remove the reminder completely.
+  is raised, as a reminder to raise and lower the piston to clean it after brewing. It is about this
+  routine cleaning, not about greasing or descaling (that's what the maintenance cards are for). Turn
+  it off with the gear icon at the top right; the setting is kept with the machine's settings (see
+  *Where settings are kept*). Set `reminder: false` to remove the reminder completely.
+- Each time the machine returns to idle, and when a tablet wakes up, the card re-reads the piston
+  position and the shots since the last raise from the recorder. A short raise or a shot that a
+  sleeping tablet missed doesn't leave the card showing an old state.
 
 ### Shot card, warm-up card and history navigator
 
 - **Shot card**: the last brewing cycle (`binary_sensor.<prefix>_brewing` off → on → off), loaded
   from recorder history. While a shot runs it plots live, redrawing at most 5 times a second so
-  slow wall tablets keep up.
+  slow wall tablets keep up. Stretches without data are shaded (see *When Home Assistant misses data*).
 - **Warm-up card**: the boiler, brew head and external temperatures plus the target, from the moment
   the machine starts heating until the shot starts. It plots live and marks when the machine became
   READY. Sensors that are disabled in the integration are left out.
@@ -161,6 +171,21 @@ If a card can't find the machine it says **Machine not found** and which entity 
   selection and show a small tag such as `#2 / 10:50`. The count is kept with the machine's settings. Whenever the machine starts heating or brewing,
   every card jumps back to live. Without a history navigator on the page, both cards simply show the
   latest shot.
+
+### When Home Assistant misses data
+
+The cards only know what the integration receives from the machine's live data stream. If that
+stream stalls (a poor Wi-Fi connection, for example), Home Assistant gets no readings for a while:
+
+- **During a shot**, the shot card says *WAITING FOR MACHINE DATA* and the cleaning card says
+  *NO DATA* instead of showing stale values.
+- **In a recorded shot**, missing stretches (more than 8 s without a reading) are shaded and labelled
+  *NO DATA*, with lines broken across them. If the data never came back before the machine reported
+  the end of the shot, the shot is shown up to where the data stopped, with the time marked as a
+  minimum (for example *22.9 s+*).
+- **A shot during a stall** that Home Assistant never saw at all (the brewing sensor never switched
+  on) can't be shown by the cards. The machine keeps its own record of every shot, which the
+  Meticulous app shows.
 
 ### Where settings are kept
 
