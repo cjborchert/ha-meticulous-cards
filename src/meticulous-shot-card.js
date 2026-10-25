@@ -10,7 +10,7 @@
  * pressure_max: 12
  * weight_max: 55                     # grows automatically if the shot is heavier
  */
-const MSC_VERSION = "1.7.0";
+const MSC_VERSION = "1.7.1";
 // Seconds as "47.0 s" below a minute, "7:14" from a minute on.
 // Short "when" label for a shot: 08:41 today, otherwise MON 08:41 (this week) or 12 OCT
 function mscWhen(ms) {
@@ -192,7 +192,7 @@ class MeticulousShotCard extends HTMLElement {
         return;
       }
       }
-      if (this._shot && this._shot.start === shotStart && this._shot.complete) { this._render(); return; } // already have it
+      if (this._shot && this._shot.start === shotStart && this._shot.complete && this._shot.v === MSC_VERSION) { this._render(); return; } // already have it
       const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.timer, this._e.state, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
       const h = await this._hass.callWS({
         type: "history/history_during_period",
@@ -204,12 +204,13 @@ class MeticulousShotCard extends HTMLElement {
         significant_changes_only: false,
       });
       const dur = (shotEnd - shotStart) / 1000;
-      const series = (id, clampMin) => {
+      const series = (id, clampMin, inShotOnly) => {
         const out = [];
         for (const r of h[id] || []) {
           const v = parseFloat(r.s);
           if (isNaN(v)) continue;
           let t = ((r.lu || r.lc) * 1000 - shotStart) / 1000;
+          if (inShotOnly && t > dur + 0.05) continue;   // weight after the shot: the cup being moved
           t = Math.min(Math.max(t, 0), dur);
           out.push([t, clampMin === undefined ? v : Math.max(clampMin, v)]);
         }
@@ -231,7 +232,7 @@ class MeticulousShotCard extends HTMLElement {
       const prof = (h[this._e.profile] || []).filter((r) => r.s && r.s !== "unavailable" && r.s !== "unknown");
       let flow = series(this._e.flow, 0);
       let pressure = series(this._e.pressure, 0);
-      let weight = series(this._e.weight, 0);
+      let weight = series(this._e.weight, 0, true);
       let piston = series(this._e.piston);
       if (!piston.length) piston = series(this._e.pistonAlt);
       // Once the extraction has ended (the machine retracts the piston) the cup is often lifted or swapped
@@ -266,6 +267,7 @@ class MeticulousShotCard extends HTMLElement {
         final_weight: finalW,
         gaps,
         complete: true,
+        v: MSC_VERSION,   // a newer card re-reads cached shots, in case it processes them differently
       };
       this._empty = false;
       this._cursor = 0;
