@@ -1,5 +1,5 @@
 // src/meticulous-shot-card.js
-var MSC_VERSION = "1.7.0";
+var MSC_VERSION = "1.7.1";
 function mscWhen(ms) {
   const d = new Date(ms), now = /* @__PURE__ */ new Date();
   if (d.toDateString() === now.toDateString()) return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -177,7 +177,7 @@ var MeticulousShotCard = class extends HTMLElement {
           return;
         }
       }
-      if (this._shot && this._shot.start === shotStart && this._shot.complete) {
+      if (this._shot && this._shot.start === shotStart && this._shot.complete && this._shot.v === MSC_VERSION) {
         this._render();
         return;
       }
@@ -192,12 +192,13 @@ var MeticulousShotCard = class extends HTMLElement {
         significant_changes_only: false
       });
       const dur = (shotEnd - shotStart) / 1e3;
-      const series = (id, clampMin) => {
+      const series = (id, clampMin, inShotOnly) => {
         const out = [];
         for (const r of h[id] || []) {
           const v = parseFloat(r.s);
           if (isNaN(v)) continue;
           let t = ((r.lu || r.lc) * 1e3 - shotStart) / 1e3;
+          if (inShotOnly && t > dur + 0.05) continue;
           t = Math.min(Math.max(t, 0), dur);
           out.push([t, clampMin === void 0 ? v : Math.max(clampMin, v)]);
         }
@@ -219,7 +220,7 @@ var MeticulousShotCard = class extends HTMLElement {
       const prof = (h[this._e.profile] || []).filter((r) => r.s && r.s !== "unavailable" && r.s !== "unknown");
       let flow = series(this._e.flow, 0);
       let pressure = series(this._e.pressure, 0);
-      let weight = series(this._e.weight, 0);
+      let weight = series(this._e.weight, 0, true);
       let piston = series(this._e.piston);
       if (!piston.length) piston = series(this._e.pistonAlt);
       const tEnd = (h[this._e.state] || []).map((r) => [((r.lu || r.lc) * 1e3 - shotStart) / 1e3, r.s]).find(([t, st]) => t > 1 && st === "Retracting");
@@ -256,7 +257,9 @@ var MeticulousShotCard = class extends HTMLElement {
         piston,
         final_weight: finalW,
         gaps,
-        complete: true
+        complete: true,
+        v: MSC_VERSION
+        // a newer card re-reads cached shots, in case it processes them differently
       };
       this._empty = false;
       this._cursor = 0;
