@@ -10,7 +10,7 @@
  * pressure_max: 12
  * weight_max: 55                     # grows automatically if the shot is heavier
  */
-const MSC_VERSION = "1.6.1";
+const MSC_VERSION = "1.7.0";
 // Seconds as "47.0 s" below a minute, "7:14" from a minute on.
 // Short "when" label for a shot: 08:41 today, otherwise MON 08:41 (this week) or 12 OCT
 function mscWhen(ms) {
@@ -19,6 +19,24 @@ function mscWhen(ms) {
   if (now - d < 6 * 864e5) return d.toLocaleDateString("en", { weekday: "short" }).toUpperCase();
   return d.toLocaleDateString("en", { day: "numeric", month: "short" }).toUpperCase();
 }
+/* Weight series [[t, g], ...]: from time `after` on, cut at the first reading that drops more than 2 g
+ * below the highest weight so far, or rises faster than any shot pours (more than 3 g at over 8 g/s: a
+ * container being put down), and hold the last good value to the end of the shot. */
+function mscHoldAfter(weight, after, dur) {
+  if (after == null || !weight.length) return weight;
+  let max = -Infinity, prev = null, cut = null;
+  for (const p of weight) {
+    const rise = prev ? p[1] - prev[1] : 0, dt = prev ? Math.max(p[0] - prev[0], 0.05) : 1;
+    if (p[0] >= after && prev && p[0] < dur && (p[1] < max - 2 || (rise > 3 && rise / dt > 8))) { cut = p[0]; break; }
+    max = Math.max(max, p[1]); prev = p;
+  }
+  if (cut == null) return weight;
+  const out = weight.filter((p) => p[0] < cut);
+  const last = out.length ? out[out.length - 1][1] : 0;
+  out.push([cut, last], [dur, last]);
+  return out;
+}
+
 function mscTime(sec, dec) {
   if (+sec.toFixed(dec) < 60) return `${sec.toFixed(dec)}<tspan class="u"> s</tspan>`;
   const s = Math.floor(sec);
@@ -66,6 +84,7 @@ class MeticulousShotCard extends HTMLElement {
     const p = this._cfg.prefix;
     this._e = {
       brewing: `binary_sensor.${p}_brewing`,
+      state: `sensor.${p}_state`,
       pressure: `sensor.${p}_pressure`,
       flow: `sensor.${p}_flow_rate`,
       weight: `sensor.${p}_shot_weight`,
@@ -174,7 +193,7 @@ class MeticulousShotCard extends HTMLElement {
       }
       }
       if (this._shot && this._shot.start === shotStart && this._shot.complete) { this._render(); return; } // already have it
-      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.timer, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
+      const ids = [this._e.pressure, this._e.flow, this._e.weight, this._e.timer, this._e.state, this._e.profile, this._e.piston, this._e.pistonAlt].filter(Boolean);
       const h = await this._hass.callWS({
         type: "history/history_during_period",
         start_time: new Date(shotStart - 1000).toISOString(),
@@ -215,6 +234,12 @@ class MeticulousShotCard extends HTMLElement {
       let weight = series(this._e.weight, 0);
       let piston = series(this._e.piston);
       if (!piston.length) piston = series(this._e.pistonAlt);
+      // Once the extraction has ended (the machine retracts the piston) the cup is often lifted or swapped
+      // for the purge container before the brewing sensor switches off. From the first sudden drop or jump
+      // in weight after that point, hold the last good weight: the shot itself is over.
+      const tEnd = (h[this._e.state] || []).map((r) => [((r.lu || r.lc) * 1000 - shotStart) / 1000, r.s])
+        .find(([t, st]) => t > 1 && st === "Retracting");
+      weight = mscHoldAfter(weight, tEnd ? tEnd[0] : null, dur);
       // Data missing up to the end: the real end of the shot is unknown, and readings that arrive once the
       // connection recovers are from after the shot. Show the shot up to the gap, then a "no data" stretch.
       let shown = dur, cutAt = null;
@@ -294,12 +319,17 @@ class MeticulousShotCard extends HTMLElement {
     const push = (arr, v) => { const l = arr[arr.length - 1]; if (!l || l[1] !== v) arr.push([t, v]); };
     push(s.flow, val(this._e.flow));
     push(s.pressure, val(this._e.pressure));
-    push(s.weight, val(this._e.weight));
+    // after the extraction (piston retracting), ignore the weight once it jumps or drops: cup handling
+    const machine = (hass.states[this._e.state] || {}).state;
+    if (machine === "Retracting" && t > 1 && s.wEnd == null) s.wEnd = t;
+    const wv = val(this._e.weight), wl = s.weight[s.weight.length - 1];
+    if (s.wEnd != null && !s.wHold && wl && (wv < s.final_weight - 2 || (wv - wl[1] > 3 && (wv - wl[1]) / Math.max(t - wl[0], 0.05) > 8))) s.wHold = true;
+    if (!s.wHold) push(s.weight, wv);
     const pid = hass.states[this._e.piston] ? this._e.piston : this._e.pistonAlt;
     const pv = parseFloat((hass.states[pid] || {}).state);
     if (!isNaN(pv)) { s.piston = s.piston || []; push(s.piston, pv); }
     s.duration = t;
-    s.final_weight = Math.max(s.final_weight, val(this._e.weight));
+    if (!s.wHold) s.final_weight = Math.max(s.final_weight, wv);
     this._cursor = t;
     this._queueRender();
   }
