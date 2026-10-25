@@ -163,6 +163,9 @@ If a card can't find the machine it says **Machine not found** and which entity 
 - **Shot card**: the last brewing cycle (`binary_sensor.<prefix>_brewing` off → on → off), loaded
   from recorder history. While a shot runs it plots live, redrawing at most 5 times a second so
   slow wall tablets keep up. Stretches without data are shaded (see *When Home Assistant misses data*).
+  Once the extraction has ended (the machine retracts the piston), lifting the cup or swapping it for
+  the purge container doesn't spoil the trace: from the first sudden drop or jump in weight, the card
+  holds the last good weight until the shot ends, so the final weight is the weight in the cup.
 - **Warm-up card**: the boiler, brew head and external temperatures plus the target, from the moment
   the machine starts heating until the shot starts. It plots live and marks when the machine became
   READY. Sensors that are disabled in the integration are left out.
