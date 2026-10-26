@@ -19,7 +19,7 @@
  *     compact: false                                   #   true: no title pill, for tight layouts
  *   prefix: meticulous_espresso                        # every card: entity id prefix of the machine
  */
-const MC_VERSION = "3.6.0";
+const MC_VERSION = "3.6.1";
 
 /* Settings and logs are stored per Meticulous machine, shared by everyone, in Home Assistant's own
  * frontend storage ("system data"), so the cards need no helpers, calendar or integration changes.
@@ -1097,15 +1097,15 @@ class MeticulousMaintenanceEffortCard extends mcEl("effort") {
   getGridOptions() { return { columns: 12, min_columns: 6, rows: "auto" }; }
 
   /* Two repeatable piston moves (see README-meticulous-cards.md):
-   *  lower      = manual lower (Purge from Idle), measured by the integration once per move
-   *  retraction = the full-power retraction right after every shot (Piston After-Shot sensors) */
+   *  retraction = the full-power retraction right after every shot (Piston After-Shot sensors)
+   *  lower      = manual lower (Purge from Idle), measured by the integration once per move */
   static get MOVES() {
     return [
+      { key: "retraction", label: "Retraction", hint: "Post-shot retraction, every shot",
+        ids: { current: ["piston_after_shot_current"], speed: ["piston_after_shot_speed"] } },
       { key: "lower", label: "Lower", hint: "Lower from idle, manual",
         ids: { current: ["piston_lower_avg_current", "plunger_lower_avg_current"],
                speed: ["piston_lower_duration", "plunger_lower_duration"] } },   // speed = stroke / duration
-      { key: "retraction", label: "Retraction", hint: "Post-shot retraction, every shot",
-        ids: { current: ["piston_after_shot_current"], speed: ["piston_after_shot_speed"] } },
     ];
   }
   static get METRICS() {
