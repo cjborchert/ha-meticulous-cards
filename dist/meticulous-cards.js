@@ -1240,7 +1240,7 @@ if (!customElements.get("meticulous-heatup-card")) {
 }
 
 // src/meticulous-cards.js
-var MC_VERSION = "3.6.0";
+var MC_VERSION = "3.6.1";
 var MC_STORE_KEY = "meticulous-cards";
 var MC_SYS = null;
 var MC_SYS_LOADING = null;
@@ -2481,10 +2481,16 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
     return { columns: 12, min_columns: 6, rows: "auto" };
   }
   /* Two repeatable piston moves (see README-meticulous-cards.md):
-   *  lower      = manual lower (Purge from Idle), measured by the integration once per move
-   *  retraction = the full-power retraction right after every shot (Piston After-Shot sensors) */
+   *  retraction = the full-power retraction right after every shot (Piston After-Shot sensors)
+   *  lower      = manual lower (Purge from Idle), measured by the integration once per move */
   static get MOVES() {
     return [
+      {
+        key: "retraction",
+        label: "Retraction",
+        hint: "Post-shot retraction, every shot",
+        ids: { current: ["piston_after_shot_current"], speed: ["piston_after_shot_speed"] }
+      },
       {
         key: "lower",
         label: "Lower",
@@ -2493,14 +2499,8 @@ var MeticulousMaintenanceEffortCard = class _MeticulousMaintenanceEffortCard ext
           current: ["piston_lower_avg_current", "plunger_lower_avg_current"],
           speed: ["piston_lower_duration", "plunger_lower_duration"]
         }
-      },
-      // speed = stroke / duration
-      {
-        key: "retraction",
-        label: "Retraction",
-        hint: "Post-shot retraction, every shot",
-        ids: { current: ["piston_after_shot_current"], speed: ["piston_after_shot_speed"] }
       }
+      // speed = stroke / duration
     ];
   }
   static get METRICS() {
